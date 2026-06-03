@@ -23,6 +23,7 @@ import { loadConfig } from "../src/config.ts";
 import { PageSpaceApi } from "../src/api.ts";
 import { PageSpaceResolver } from "../src/resolve.ts";
 import { createPageSpaceOps } from "../src/ops.ts";
+import { registerPageSpaceProvider } from "../src/provider.ts";
 
 export default function (pi: ExtensionAPI) {
   const config = loadConfig();
@@ -116,6 +117,15 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // TODO(model provider): pi.registerProvider("pagespace", { streamSimple }) over /api/v1/chat/completions
-  //   with the prompted-tool protocol (src/provider.ts) — next leaf.
+  // Model brain: register the PageSpace provider — a custom streamSimple over
+  // /api/v1/chat/completions (model `ps-agent://<pageId>`) that keeps pi's tool loop local via a
+  // prompted-tool protocol (src/provider.ts). Verified end-to-end (test/run-provider.ts). Needs a
+  // configured brain page id (PAGESPACE_MODEL_PAGE); skip cleanly if unset so the file tools still
+  // load. The page should use a capable model (e.g. openrouter/claude-sonnet-4.6) — glm-5 is too
+  // weak to follow the prompted-tool protocol reliably.
+  if (config.modelPageId) {
+    const { providerName, modelId } = registerPageSpaceProvider(pi, config);
+    void providerName;
+    void modelId;
+  }
 }
