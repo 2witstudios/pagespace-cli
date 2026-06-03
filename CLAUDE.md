@@ -1,0 +1,83 @@
+# pagespace-cli — PageSpace-native pi companion
+
+## ⭐ Vision (primary context — read this first)
+**We are building a coding harness that is PageSpace-native** — PageSpace is the substrate (pi's
+filesystem, model/brain, memory, and task list). Before anything else, `read_page` the **Vision**:
+PageSpace page `eulvhetfqz8ll6566bwxexar` (drive `pagespace-cli`). It is the north star — core concept,
+principles, direction — and the **primary per-project injection** (the context engine will inject it
+first; until then, this instruction does).
+
+A **pi package** (soft-fork of `@earendil-works/pi-coding-agent`, MIT) that makes `pi` a native
+companion to PageSpace. Active plan: `~/.claude/plans/get-the-pi-dev-repo-compressed-church.md`.
+
+## What it is (two axes, one scoped MCP token)
+
+1. **Files (dual-mount):** pi's own `read`/`write`/`edit`/`ls`/`find`/`grep` route by path —
+   `pagespace/<drive>/…` → PageSpace pages (`/api/mcp/documents`), everything else → the local
+   repo; `bash` stays local. PageSpace mounts in as the spec/knowledge/memory layer.
+2. **Brain (model):** pi's LLM calls → PageSpace `POST /api/v1/chat/completions` (chat-only), model
+   `ps-agent://<pageId>`. A custom `streamSimple` shim keeps the whole tool loop in pi (inject tool
+   specs → parse tool-call blocks from the reply → pi executes), so PageSpace never sees tools.
+
+## Layout
+
+```
+extensions/pagespace.ts   # pi extension entry (dual-mount adapter + provider register)
+src/                      # helpers (config, api client, resolve, ops, provider) — not pi-loaded
+skills/                   # pi runtime skills (orientation; aidd-* come from ~/.agents/skills)
+prompts/                  # pi prompt templates (AIDD workflow commands)
+ai/, aidd-custom/, AGENTS.md   # AIDD framework scaffold (npx aidd)
+```
+
+## State lives in PageSpace + this repo (use the `pagespace` MCP)
+
+**The PageSpace `pagespace-cli` drive + this git repo ARE the project's state. Work statelessly:**
+load context from the drive at the start of a task, write durable outputs back to it, and don't
+rely on conversation memory. Drive `pagespace-cli` (`kv725pqqj5go7rcvp2mv8zb8`).
+
+**Where things go** (read the drive's `_index` for the full rules; place by intent):
+Knowledge → `Brain/` · Requirement → `Specs/` · Work item → `Epics/` · Code map → `Codebase/` ·
+Decision → `Brain/decisions/` + `Activity Log` · History → `Activity Log` · Why → `Vision` ·
+Active plan → `Plan` · Agents → `Agents/`.
+
+Page map:
+- **`_index`** `clhjx7xu5e4yhlvpfs3h7xea` — drive front door (IA + statelessness).
+- **Brain** (filesystem index) `dw9jthqyaza6ga3b6m5nmpqw` — a *tree of small notes*
+  (`overview`, `architecture/*`, `grounding/*`, `decisions`, `setup-status`, `drive-map`), NOT one
+  big doc. Read the index, open only the note you need; add new durable knowledge as a focused
+  child page and list it in the nearest index — keep notes small.
+- **Epics/** `ya71x41o5jys5ks4o7ths4gn` — the task board: 5 epic TASK_LISTs (Local MVP / Memory &
+  Curator / Branded CLI / Cloud orchestration / Hardening), each body holds `Given X, should Y`
+  requirements; statuses To Do / In Progress / Blocked / Done — keep current. ·
+  **Vision** `eulvhetfqz8ll6566bwxexar` · **Plan** `v8ru7gkaywqnl0dpiltn2ezu` ·
+  **Activity Log** `rlh61u86xxh3ygtcl6dwskw6` (AIDD `/log`).
+- **Specs/** `wr0uw2q2po3vrpw7rn8lb4ng` · **Codebase/** `lditf7um1de4vbymqs9yj7vj` (repo map).
+- **Agents/** `du2tfkewyoorurnmstp273ql`:
+  - **Companion Agent** `xi9jg89d1qf40km2l29043yy` — pi's model brain
+    (`ps-agent://xi9jg89d1qf40km2l29043yy`, `pagespace`/`pro`); `PAGESPACE_MODEL_PAGE`.
+  - **Curator** `edekppwg59nv3qi3es41p2bf` — librarian agent that keeps the drive indexed,
+    content-invalidated, organized, and in sync (Tasks/Plan/Activity Log/Codebase/Brain). Invoke
+    it (`ask_agent`) after meaningful changes so the drive's state stays coherent.
+
+Use the `pagespace` MCP tools (`read_page`, `replace_lines`, `create_page`, `create_task`,
+`update_task`, `get_assigned_tasks`, …) — PageSpace is the source of truth for memory + tasks, not
+local notes. (Configured in `./.mcp.json`; approve the project MCP server if its tools aren't loaded.)
+
+## Working method (AIDD + PageSpace)
+
+Follow the AIDD workflow (`/discover`, `/task`, `/execute`, `/aidd-fix`, `/review`, `/commit`) and
+the `aidd-*` skills. Plan/specs/tasks live as PageSpace pages, not local `tasks/*.md`. Code lives in
+this repo. Verify with real runs before marking a task Done.
+
+## Env
+
+`PAGESPACE_API_URL` (default `https://pagespace.ai`), `PAGESPACE_AUTH_TOKEN` (scoped MCP token),
+`PAGESPACE_DRIVE` (default drive slug for the mount), `PAGESPACE_MOUNT` (mount prefix, default
+`pagespace`).
+
+## Critical
+
+- Don't bundle pi packages — they're `peerDependencies` (`@earendil-works/pi-coding-agent`,
+  `@earendil-works/pi-ai`, `typebox`).
+- pi seam reference skill: `~/.agents/skills/pi-harness-dev/`. pi source: `~/production/pi`.
+- Iterate: `pi install -l .` (or add the path to `.pi/settings.json`), then `/reload`.

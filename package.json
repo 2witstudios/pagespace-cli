@@ -1,0 +1,29 @@
+{
+  "name": "pagespace-cli",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "PageSpace-native pi companion — dual-mount files (PageSpace pages as pi's filesystem) + PageSpace chat as pi's model brain.",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
