@@ -1,49 +1,121 @@
 /**
- * pagespace-cli — PageSpace-native pi companion (extension entry).
+ * pagespace-cli — dual-mount adapter (pi extension entry).
  *
- * Phase A wiring:
- *   1. Dual-mount adapter — route pi's read/write/edit/ls/find/grep by path:
- *        `<mount>/<drive>/…` -> PageSpace pages (/api/mcp/documents), else -> local fs.
- *        bash stays local. (src/ops.ts + src/resolve.ts — TODO)
- *   2. Model brain — register a `pagespace` provider whose custom streamSimple talks to
- *        POST /api/v1/chat/completions (model ps-agent://<pageId>) and keeps the whole
- *        tool loop inside pi via a prompted-tool protocol. (src/provider.ts — TODO)
+ * Routes pi's own read/write/edit/ls/find/grep by path: anything under the PageSpace mount
+ * (`<cwd>/<PAGESPACE_MOUNT>/…`, default `<cwd>/pagespace/…`) operates on PageSpace pages;
+ * everything else uses pi's normal local-fs tools. `bash` is left untouched (always local).
  *
- * This entry currently registers a connectivity smoke-test tool so the package loads and
- * PageSpace auth can be verified from pi end-to-end. Build out 1 + 2 next (see PageSpace Tasks).
+ * Status: the page-backed operations (src/ops.ts) are verified against the live drive
+ * (test/run-ops.ts). This entry wires them into pi's tools; needs a pi load to verify end to end.
  */
+import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  createReadTool,
+  createWriteTool,
+  createEditTool,
+  createLsTool,
+  createFindTool,
+  createGrepTool,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { loadConfig } from "../src/config.ts";
 import { PageSpaceApi } from "../src/api.ts";
+import { PageSpaceResolver } from "../src/resolve.ts";
+import { createPageSpaceOps } from "../src/ops.ts";
 
 export default function (pi: ExtensionAPI) {
   const config = loadConfig();
   const api = new PageSpaceApi(config);
+  const resolver = new PageSpaceResolver(api);
+  const cwd = process.cwd();
+  const mountRoot = path.resolve(cwd, config.mountPrefix);
+  const ops = createPageSpaceOps(api, resolver, { mountRoot });
 
-  // Smoke test: proves the scoped token + base URL reach PageSpace from inside pi.
+  const routes = (params: { path?: string }): boolean =>
+    ops.isMountPath(path.resolve(cwd, params?.path ?? "."));
+
+  // Replace each built-in (same name) with a router that delegates by path: PageSpace-backed
+  // when the path is under the mount, pi's local-fs tool otherwise. Registered explicitly (not
+  // in a loop) so each tool keeps its concrete param type.
+  {
+    const local = createReadTool(cwd);
+    const page = createReadTool(cwd, { operations: ops.read });
+    pi.registerTool({
+      ...local,
+      async execute(id, params, signal, onUpdate) {
+        return (routes(params) ? page : local).execute(id, params, signal, onUpdate);
+      },
+    });
+  }
+  {
+    const local = createWriteTool(cwd);
+    const page = createWriteTool(cwd, { operations: ops.write });
+    pi.registerTool({
+      ...local,
+      async execute(id, params, signal, onUpdate) {
+        return (routes(params) ? page : local).execute(id, params, signal, onUpdate);
+      },
+    });
+  }
+  {
+    const local = createEditTool(cwd);
+    const page = createEditTool(cwd, { operations: ops.edit });
+    pi.registerTool({
+      ...local,
+      async execute(id, params, signal, onUpdate) {
+        return (routes(params) ? page : local).execute(id, params, signal, onUpdate);
+      },
+    });
+  }
+  {
+    const local = createLsTool(cwd);
+    const page = createLsTool(cwd, { operations: ops.ls });
+    pi.registerTool({
+      ...local,
+      async execute(id, params, signal, onUpdate) {
+        return (routes(params) ? page : local).execute(id, params, signal, onUpdate);
+      },
+    });
+  }
+  {
+    const local = createFindTool(cwd);
+    const page = createFindTool(cwd, { operations: ops.find });
+    pi.registerTool({
+      ...local,
+      async execute(id, params, signal, onUpdate) {
+        return (routes(params) ? page : local).execute(id, params, signal, onUpdate);
+      },
+    });
+  }
+  {
+    const local = createGrepTool(cwd);
+    const page = createGrepTool(cwd, { operations: ops.grep });
+    pi.registerTool({
+      ...local,
+      async execute(id, params, signal, onUpdate) {
+        return (routes(params) ? page : local).execute(id, params, signal, onUpdate);
+      },
+    });
+  }
+  // bash: intentionally left as pi's built-in (always local).
+
+  // Connectivity smoke tool.
   pi.registerTool({
-    name: "pagespace_list_drives",
-    label: "PageSpace: list drives",
-    description:
-      "List the PageSpace drives reachable with the configured scoped token. Use to confirm the PageSpace companion is wired up.",
+    name: "pagespace_status",
+    label: "PageSpace: status",
+    description: "Show the PageSpace mount + the drives this scoped token can reach.",
     parameters: Type.Object({}),
     async execute() {
-      if (!config.authToken) {
-        return {
-          content: [{ type: "text", text: "PAGESPACE_AUTH_TOKEN is not set." }],
-          details: {},
-          isError: true,
-        };
-      }
       const drives = await api.listDrives();
       const text =
-        drives.map((d) => `- ${d.name} (${d.slug}) [${d.id}] role=${d.role ?? "?"}`).join("\n") ||
-        "(no drives)";
-      return { content: [{ type: "text", text }], details: { drives } };
+        `mount: ${mountRoot}\napiUrl: ${config.apiUrl}\ndefaultDrive: ${config.defaultDriveSlug ?? "(none)"}\n` +
+        `drives:\n` +
+        (drives.map((d) => `  - ${d.name} (${d.slug}) [${d.id}]`).join("\n") || "  (none)");
+      return { content: [{ type: "text", text }], details: { drives, mountRoot } };
     },
   });
 
-  // TODO(1): build the dual-mount routing operations and register over read/write/edit/ls/find/grep.
-  // TODO(2): pi.registerProvider("pagespace", { streamSimple: makePromptedToolStream(config), models: [...] }).
+  // TODO(model provider): pi.registerProvider("pagespace", { streamSimple }) over /api/v1/chat/completions
+  //   with the prompted-tool protocol (src/provider.ts) — next leaf.
 }
