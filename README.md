@@ -7,18 +7,32 @@ A PageSpace-native `pi` companion (a [pi](https://pi.dev) package).
 - **PageSpace as the model brain:** pi's LLM calls go to PageSpace `POST /api/v1/chat/completions`
   (model `ps-agent://<pageId>`); a prompted-tool shim keeps the tool loop entirely in pi.
 
-## Use (development)
+## Auth & config
+
+Configure via environment variables (or `.mcp.json` — copy `.mcp.json.example` and fill in your
+token; the real `.mcp.json` is gitignored):
+
+| Var | Required | Purpose |
+|-----|----------|---------|
+| `PAGESPACE_AUTH_TOKEN` | **yes** | Scoped PageSpace MCP token (Bearer). |
+| `PAGESPACE_API_URL` | no | Instance URL (default `https://pagespace.ai`). |
+| `PAGESPACE_DRIVE` | no | Default drive slug for the mount + memory engine. |
+| `PAGESPACE_MODEL_PAGE` | no | Brain agent page id (`ps-agent://<id>`) — pi's model. |
+| `PAGESPACE_READONLY` | no | Comma-separated mount sub-paths the write/edit tools refuse (spec immutability), e.g. `Specs,Epics`. |
+
+Check your setup (env report + a live auth ping):
 
 ```bash
-export PAGESPACE_API_URL="https://pagespace.ai"
-export PAGESPACE_AUTH_TOKEN="<your scoped MCP token>"
-export PAGESPACE_DRIVE="pagespace-cli"
-
-pi install -l .          # or add this path to .pi/settings.json
-pi                       # /reload after edits
+pagespace status        # or: node bin/pagespace.mjs status
 ```
 
-Copy `.mcp.json.example` to `.mcp.json` and fill in your token (the real `.mcp.json` is gitignored).
+## Use
+
+```bash
+pi install -l .          # register this package with pi (or add the path to .pi/settings.json)
+pagespace                # branded launcher: pi with the PageSpace extension preloaded
+# …equivalently: pi -e ./extensions/pagespace.ts
+```
 
 ## Layout
 
