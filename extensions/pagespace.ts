@@ -31,7 +31,7 @@ export default function (pi: ExtensionAPI) {
   const resolver = new PageSpaceResolver(api);
   const cwd = process.cwd();
   const mountRoot = path.resolve(cwd, config.mountPrefix);
-  const ops = createPageSpaceOps(api, resolver, { mountRoot });
+  const ops = createPageSpaceOps(api, resolver, { mountRoot, defaultDriveSlug: config.defaultDriveSlug });
 
   const routes = (params: { path?: string }): boolean =>
     ops.isMountPath(path.resolve(cwd, params?.path ?? "."));
@@ -90,12 +90,16 @@ export default function (pi: ExtensionAPI) {
     });
   }
   {
+    // pi's grep spawns ripgrep against the LOCAL fs, so it can't search PageSpace pages — for
+    // mount paths we route to the drive's server-side regex_search (ops.grepSearch) instead.
     const local = createGrepTool(cwd);
-    const page = createGrepTool(cwd, { operations: ops.grep });
     pi.registerTool({
       ...local,
       async execute(id, params, signal, onUpdate) {
-        return (routes(params) ? page : local).execute(id, params, signal, onUpdate);
+        if (routes(params)) {
+          return ops.grepSearch({ ...params, path: path.resolve(cwd, params?.path ?? ".") });
+        }
+        return local.execute(id, params, signal, onUpdate);
       },
     });
   }
