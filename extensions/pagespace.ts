@@ -20,6 +20,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { loadConfig } from "../src/config.ts";
+import { loadDotenv } from "../src/env.ts";
 import { PageSpaceApi } from "../src/api.ts";
 import { PageSpaceResolver } from "../src/resolve.ts";
 import { createPageSpaceOps } from "../src/ops.ts";
@@ -37,6 +38,9 @@ import { registerBuildTool } from "../src/build.ts";
 import { registerPageSpaceProvider } from "../src/provider.ts";
 
 export default function (pi: ExtensionAPI) {
+  // Source PAGESPACE_* from a project .env/.env.local before reading config, so the brain provider
+  // registers under plain `pi` without the user having to export vars in every shell (shell wins).
+  loadDotenv();
   const config = loadConfig();
   const api = new PageSpaceApi(config);
   const resolver = new PageSpaceResolver(api);

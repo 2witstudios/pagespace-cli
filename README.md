@@ -30,16 +30,39 @@ The optional branded `pagespace` command needs an extra `npm link` — see [Use]
 
 ## Auth & config
 
-Configure via environment variables (or `.mcp.json` — copy `.mcp.json.example` and fill in your
-token; the real `.mcp.json` is gitignored):
+Configure via environment variables. The simplest durable way is a **`.env.local`** in the repo
+root — the extension and the `pagespace` launcher load `.env.local` then `.env` automatically
+(`src/env.ts`); real shell exports always win over the files. `.env*` is gitignored, so your token
+stays out of git.
+
+```bash
+cat > .env.local <<'EOF'
+PAGESPACE_API_URL=https://pagespace.ai
+PAGESPACE_AUTH_TOKEN=mcp_your_scoped_token
+PAGESPACE_DRIVE=pagespace-cli
+PAGESPACE_MODEL_PAGE=your_brain_agent_page_id
+EOF
+```
 
 | Var | Required | Purpose |
 |-----|----------|---------|
 | `PAGESPACE_AUTH_TOKEN` | **yes** | Scoped PageSpace MCP token (Bearer). |
 | `PAGESPACE_API_URL` | no | Instance URL (default `https://pagespace.ai`). |
 | `PAGESPACE_DRIVE` | no | Default drive slug for the mount + memory engine. |
-| `PAGESPACE_MODEL_PAGE` | no | Brain agent page id (`ps-agent://<id>`) — pi's model. |
+| `PAGESPACE_MODEL_PAGE` | no | Brain agent page id — registers the `pagespace/<id>` model (pi's brain). |
 | `PAGESPACE_READONLY` | no | Comma-separated mount sub-paths the write/edit tools refuse (spec immutability), e.g. `Specs,Epics`. |
+
+### Using PageSpace as pi's model
+
+`PAGESPACE_MODEL_PAGE` registers a `pagespace/<pageId>` model in pi (named **PageSpace Brain**).
+Select it with `/model` inside pi, or make it the default once in `~/.pi/agent/settings.json`:
+
+```json
+{ "defaultProvider": "pagespace", "defaultModel": "<your brain agent page id>" }
+```
+
+The model only registers when `PAGESPACE_MODEL_PAGE` is set *and* the extension is loaded — so set it
+in `.env.local` (above) and launch via `pi` (after `pi install -l .`) or `pagespace`.
 
 Check your setup (env report + a live auth ping) — works without any install step:
 
