@@ -32,10 +32,10 @@ let fail = 0;
 function ok(name: string, cond: boolean): void {
   if (cond) {
     pass++;
-    console.log("  PASS  " + name);
+    console.log(`  PASS  ${name}`);
   } else {
     fail++;
-    console.log("  FAIL  " + name);
+    console.log(`  FAIL  ${name}`);
   }
 }
 
@@ -72,7 +72,10 @@ async function main(): Promise<void> {
 
   // find glob
   const found = await ops.find.glob("*", P("_optest"), { ignore: [], limit: 100 });
-  ok("find glob finds note", found.some((f) => f.endsWith("/note.md")));
+  ok(
+    "find glob finds note",
+    found.some((f) => f.endsWith("/note.md")),
+  );
 
   // ambiguity guard / not-found
   ok("isMountPath true under mount", ops.isMountPath(P("Brain")));

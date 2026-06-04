@@ -28,7 +28,11 @@ const streamSimple = createPageSpaceStreamSimple({
 const model = { api: "openai-completions", provider: "pagespace", id: modelPageId } as unknown as Model<any>;
 
 const TOOLS = [
-  { name: "read", description: "Read a file from the local repo.", parameters: Type.Object({ path: Type.String() }) },
+  {
+    name: "read",
+    description: "Read a file from the local repo.",
+    parameters: Type.Object({ path: Type.String() }),
+  },
   {
     name: "bash",
     description: "Run a shell command; returns stdout/stderr.",
@@ -52,7 +56,8 @@ async function drain(context: Context): Promise<Drained> {
   for await (const ev of stream) {
     out.events.push(ev.type);
     if (ev.type === "text_delta") out.text += ev.delta;
-    else if (ev.type === "toolcall_end") out.toolCalls.push({ name: ev.toolCall.name, arguments: ev.toolCall.arguments });
+    else if (ev.type === "toolcall_end")
+      out.toolCalls.push({ name: ev.toolCall.name, arguments: ev.toolCall.arguments });
     else if (ev.type === "done") out.stopReason = ev.reason;
     else if (ev.type === "error") out.stopReason = `error:${ev.error.errorMessage}`;
   }
@@ -65,9 +70,9 @@ function ok(name: string, cond: boolean, extra = ""): void {
   total++;
   if (cond) {
     pass++;
-    console.log(`  PASS  ${name}${extra ? "  " + extra : ""}`);
+    console.log(`  PASS  ${name}${extra ? `  ${extra}` : ""}`);
   } else {
-    console.log(`  FAIL  ${name}${extra ? "  " + extra : ""}`);
+    console.log(`  FAIL  ${name}${extra ? `  ${extra}` : ""}`);
   }
 }
 
@@ -77,7 +82,9 @@ async function main(): Promise<void> {
   const a = await drain({
     systemPrompt,
     tools: TOOLS,
-    messages: [{ role: "user", content: "Read ./package.json and tell me the name field.", timestamp: Date.now() }],
+    messages: [
+      { role: "user", content: "Read ./package.json and tell me the name field.", timestamp: Date.now() },
+    ],
   });
   console.log(`  events: ${a.events.join(",")}`);
   console.log(`  toolCalls: ${JSON.stringify(a.toolCalls)}`);
@@ -100,7 +107,14 @@ async function main(): Promise<void> {
         api: "openai-completions",
         provider: "pagespace",
         model: modelPageId,
-        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
         stopReason: "toolUse",
         timestamp: Date.now(),
       } as Message,
@@ -116,7 +130,10 @@ async function main(): Promise<void> {
   });
   console.log(`  text: ${JSON.stringify(b.text.slice(0, 200))}`);
   console.log(`  toolCalls: ${JSON.stringify(b.toolCalls)}`);
-  ok("B: mentions the real name from the tool result", /pagespace-cli/.test(b.text + JSON.stringify(b.toolCalls)));
+  ok(
+    "B: mentions the real name from the tool result",
+    /pagespace-cli/.test(b.text + JSON.stringify(b.toolCalls)),
+  );
   ok("B: terminated cleanly", b.stopReason === "stop" || b.stopReason === "toolUse");
 
   // Case C: a plain question -> text answer, stopReason stop, no tool call.
