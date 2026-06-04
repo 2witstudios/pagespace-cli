@@ -23,11 +23,7 @@ export interface LsOperations {
 }
 export interface FindOperations {
   exists: (absolutePath: string) => Promise<boolean>;
-  glob: (
-    pattern: string,
-    cwd: string,
-    options: { ignore: string[]; limit: number },
-  ) => Promise<string[]>;
+  glob: (pattern: string, cwd: string, options: { ignore: string[]; limit: number }) => Promise<string[]>;
 }
 export interface GrepOperations {
   isDirectory: (absolutePath: string) => Promise<boolean>;
@@ -82,7 +78,7 @@ export interface PageSpaceOps {
 // a syntax-aware letter->[aA] transform for case-insensitivity.
 
 /** Escape a literal string into a backslash-free regex (Postgres-safe). */
-function literalToPgRegex(s: string, ignoreCase: boolean): string {
+export function literalToPgRegex(s: string, ignoreCase: boolean): string {
   let out = "";
   for (const ch of s) {
     if (ignoreCase && /[a-z]/i.test(ch)) {
@@ -121,7 +117,7 @@ function buildClientRegex(params: GrepParams): RegExp | null {
 }
 
 /** Extract matching lines from a page's content (1-based line numbers, like grep/ripgrep). */
-function matchLinesIn(content: string, re: RegExp): { lineNumber: number; content: string }[] {
+export function matchLinesIn(content: string, re: RegExp): { lineNumber: number; content: string }[] {
   const out: { lineNumber: number; content: string }[] = [];
   const lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   for (let i = 0; i < lines.length; i++) {
@@ -132,15 +128,31 @@ function matchLinesIn(content: string, re: RegExp): { lineNumber: number; conten
 }
 
 /** Make a regex case-insensitive without flags: rewrite letters as `[aA]`, respecting escapes/classes. */
-function regexToCaseInsensitive(s: string): string {
+export function regexToCaseInsensitive(s: string): string {
   let out = "";
   let escaped = false;
   let inClass = false;
   for (const ch of s) {
-    if (escaped) { out += ch; escaped = false; continue; } // keep \d, \w, … intact
-    if (ch === "\\") { out += ch; escaped = true; continue; }
-    if (ch === "[") { inClass = true; out += ch; continue; }
-    if (ch === "]") { inClass = false; out += ch; continue; }
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    } // keep \d, \w, … intact
+    if (ch === "\\") {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === "[") {
+      inClass = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "]") {
+      inClass = false;
+      out += ch;
+      continue;
+    }
     if (/[a-z]/i.test(ch)) {
       const both = `${ch.toLowerCase()}${ch.toUpperCase()}`;
       out += inClass ? both : `[${both}]`;
@@ -155,7 +167,7 @@ function norm(p: string): string {
   return p.replace(/\/+/g, "/").replace(/\/$/, "");
 }
 
-function globToRegExp(pattern: string): RegExp {
+export function globToRegExp(pattern: string): RegExp {
   let re = "";
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i];
@@ -166,10 +178,10 @@ function globToRegExp(pattern: string): RegExp {
         if (pattern[i + 1] === "/") i++;
       } else re += "[^/]*";
     } else if (c === "?") re += "[^/]";
-    else if ("\\^$+.()|{}[]".includes(c)) re += "\\" + c;
+    else if ("\\^$+.()|{}[]".includes(c)) re += `\\${c}`;
     else re += c;
   }
-  return new RegExp("^" + re + "$");
+  return new RegExp(`^${re}$`);
 }
 
 export function createPageSpaceOps(
@@ -182,7 +194,7 @@ export function createPageSpaceOps(
 
   const isMountPath = (absolutePath: string): boolean => {
     const p = norm(absolutePath);
-    return p === mountRoot || p.startsWith(mountRoot + "/");
+    return p === mountRoot || p.startsWith(`${mountRoot}/`);
   };
   const toMountRel = (absolutePath: string): string => {
     const p = norm(absolutePath);
@@ -357,13 +369,13 @@ export function createPageSpaceOps(
       const scopeRel = segments.length ? `${driveSlug}/${segments.join("/")}` : driveSlug;
       const globRe = params.glob ? globToRegExp(params.glob) : null;
       const MAX_LINE = 400;
-      const clip = (s: string) => (s.length > MAX_LINE ? s.slice(0, MAX_LINE) + " …[truncated]" : s);
+      const clip = (s: string) => (s.length > MAX_LINE ? `${s.slice(0, MAX_LINE)} …[truncated]` : s);
 
       const lines: string[] = [];
       let matchLimitReached = false;
       outer: for (const m of results) {
         const stripped = m.semanticPath.replace(/^\/+/, ""); // "drive/seg/leaf"
-        const inScope = stripped === scopeRel || stripped.startsWith(scopeRel + "/");
+        const inScope = stripped === scopeRel || stripped.startsWith(`${scopeRel}/`);
         if (!inScope) continue;
         const relPath =
           stripped === scopeRel ? stripped.split("/").pop()! : stripped.slice(scopeRel.length + 1);

@@ -30,9 +30,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { PageSpaceConfig } from "./config.ts";
-
-const OPEN = "<tool_call>";
-const CLOSE = "</tool_call>";
+import { CLOSE, OPEN, ToolCallParser } from "./tool-call-parser.ts";
 
 /** Strip a `ps-agent://` prefix if present; the page id is what the route wants after the prefix. */
 function toAgentModel(modelId: string): string {
@@ -138,39 +136,6 @@ Assistant: 4`);
   return sections.join("\n\n");
 }
 
-/**
- * Scan `s` for the first complete JSON object (brace-balanced, string/escape aware) starting at the
- * first `{`. Returns the parsed value + the index just past its closing brace, or null if incomplete.
- */
-function tryExtractFirstJsonObject(s: string): { value: any; end: number } | null {
-  const start = s.indexOf("{");
-  if (start === -1) return null;
-  let depth = 0;
-  let inStr = false;
-  let esc = false;
-  for (let i = start; i < s.length; i++) {
-    const c = s[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === "\\") esc = true;
-      else if (c === '"') inStr = false;
-    } else if (c === '"') inStr = true;
-    else if (c === "{") depth++;
-    else if (c === "}") {
-      depth--;
-      if (depth === 0) {
-        const slice = s.slice(start, i + 1);
-        try {
-          return { value: JSON.parse(slice), end: i + 1 };
-        } catch {
-          return null; // malformed despite balance — wait for more / give up
-        }
-      }
-    }
-  }
-  return null;
-}
-
 /** Build the custom streamSimple bound to a PageSpace config. */
 export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
   const endpoint = `${config.apiUrl.replace(/\/$/, "")}/api/v1/chat/completions`;
@@ -231,110 +196,53 @@ export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
       };
       const endText = () => {
         if (!textBlock) return;
-        stream.push({ type: "text_end", contentIndex: idxOf(textBlock), content: textBlock.text, partial: output });
+        stream.push({
+          type: "text_end",
+          contentIndex: idxOf(textBlock),
+          content: textBlock.text,
+          partial: output,
+        });
         textBlock = null;
       };
 
-      // Weaker models (e.g. glm-5) reliably emit the tool-call JSON but often drop the
-      // `<tool_call>` wrapper and add a prose preamble. So we accept either a wrapped block OR a
-      // bare JSON object — the bare path is guarded: it must start with "name"/"arguments" (so
-      // prose braces like "{a, b}" never trigger) AND its name must be a real tool.
-      const toolNames = new Set((context.tools ?? []).map((t) => t.name));
-      const looksLikeToolJson = (s: string): boolean => /^\{\s*"(name|arguments)"\s*:/.test(s);
-      const HOLDBACK = OPEN.length - 1; // keep back a possible split `<tool_call>` tail
-      const CLASSIFY_MIN = 14; // chars needed to be sure a `{` is/ isn't `{"name"`/`{"arguments"`
-
-      let mode: "text" | "tool" = "text";
-      let acc = ""; // text-mode working buffer
-      let toolBuf = ""; // tool-mode buffer (everything after a `<tool_call>` wrapper)
+      // Parse the prompted-tool protocol out of the streamed text (src/tool-call-parser.ts):
+      // accepts a `<tool_call>` block or a bare `{"name":…}` whose name is a real tool.
+      const parser = new ToolCallParser((context.tools ?? []).map((t) => t.name));
       let toolCall: ToolCall | null = null;
       let toolSeq = 0;
 
-      const finalizeTool = (value: any): boolean => {
-        toolCall = {
-          type: "toolCall",
-          id: `ps_${Date.now().toString(36)}_${toolSeq++}`,
-          name: value.name,
-          arguments: (value.arguments ?? {}) as Record<string, any>,
-        };
-        const ci = blocks.push(toolCall) - 1;
-        stream.push({ type: "toolcall_start", contentIndex: ci, partial: output });
-        stream.push({
-          type: "toolcall_delta",
-          contentIndex: ci,
-          delta: JSON.stringify(toolCall.arguments),
-          partial: output,
-        });
-        stream.push({ type: "toolcall_end", contentIndex: ci, toolCall, partial: output });
-        output.stopReason = "toolUse";
-        return true;
-      };
-
-      // Feed one chunk through the text→tool state machine. Returns true once the first tool call
-      // is parsed (caller stops reading + aborts the stream).
-      const feedChunk = (chunk: string): boolean => {
-        if (mode === "tool") {
-          // Inside a `<tool_call>` wrapper — the wrapper is explicit intent, so accept any name.
-          toolBuf += chunk;
-          const found = tryExtractFirstJsonObject(toolBuf);
-          if (found && found.value && typeof found.value.name === "string") return finalizeTool(found.value);
-          return false;
-        }
-        acc += chunk;
-        for (;;) {
-          const openIdx = acc.indexOf(OPEN);
-          const braceIdx = acc.indexOf("{");
-          // No trigger at all → emit text minus a small holdback for a split wrapper.
-          if (openIdx === -1 && braceIdx === -1) {
-            const safe = Math.max(0, acc.length - HOLDBACK);
-            emitText(acc.slice(0, safe));
-            acc = acc.slice(safe);
-            return false;
-          }
-          // `<tool_call>` wrapper is earliest → commit to a tool call.
-          if (openIdx !== -1 && (braceIdx === -1 || openIdx < braceIdx)) {
-            emitText(acc.slice(0, openIdx));
-            endText();
-            mode = "tool";
-            toolBuf = acc.slice(openIdx + OPEN.length);
-            acc = "";
-            const found = tryExtractFirstJsonObject(toolBuf);
-            if (found && found.value && typeof found.value.name === "string") return finalizeTool(found.value);
-            return false;
-          }
-          // A bare `{` is earliest — classify it as a tool-call JSON or prose.
-          const rest = acc.slice(braceIdx);
-          if (rest.length < CLASSIFY_MIN && !rest.includes("}")) {
-            emitText(acc.slice(0, braceIdx)); // hold from the brace until we can classify
-            acc = rest;
-            return false;
-          }
-          if (!looksLikeToolJson(rest)) {
-            emitText(acc.slice(0, braceIdx + 1)); // prose brace → emit through it, keep scanning
-            acc = acc.slice(braceIdx + 1);
+      // Apply parser segments to the pi event stream. Returns true once a tool call is emitted
+      // (caller then stops reading + aborts the upstream).
+      const applySegments = (segs: ReturnType<ToolCallParser["feed"]>): boolean => {
+        for (const seg of segs) {
+          if (seg.type === "text") {
+            emitText(seg.delta);
             continue;
           }
-          const found = tryExtractFirstJsonObject(rest);
-          if (!found) {
-            emitText(acc.slice(0, braceIdx)); // tool-call JSON not complete yet → hold
-            acc = rest;
-            return false;
-          }
-          if (found.value && typeof found.value.name === "string" && toolNames.has(found.value.name)) {
-            emitText(acc.slice(0, braceIdx));
-            endText();
-            return finalizeTool(found.value);
-          }
-          emitText(acc.slice(0, braceIdx + found.end)); // complete JSON but not a tool → text
-          acc = acc.slice(braceIdx + found.end);
+          endText();
+          toolCall = {
+            type: "toolCall",
+            id: `ps_${Date.now().toString(36)}_${toolSeq++}`,
+            name: seg.name,
+            arguments: seg.arguments as Record<string, any>,
+          };
+          const ci = blocks.push(toolCall) - 1;
+          stream.push({ type: "toolcall_start", contentIndex: ci, partial: output });
+          stream.push({
+            type: "toolcall_delta",
+            contentIndex: ci,
+            delta: JSON.stringify(toolCall.arguments),
+            partial: output,
+          });
+          stream.push({ type: "toolcall_end", contentIndex: ci, toolCall, partial: output });
+          output.stopReason = "toolUse";
+          return true;
         }
+        return false;
       };
 
       try {
-        const messages = [
-          { role: "system", content: buildSystemText(context) },
-          ...toV1Messages(context),
-        ];
+        const messages = [{ role: "system", content: buildSystemText(context) }, ...toV1Messages(context)];
         const res = await fetch(endpoint, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
@@ -374,10 +282,11 @@ export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
             } catch {
               continue; // keepalive / non-JSON
             }
-            if (json.usage) usageSeen = { input: json.usage.prompt_tokens, output: json.usage.completion_tokens };
+            if (json.usage)
+              usageSeen = { input: json.usage.prompt_tokens, output: json.usage.completion_tokens };
             const delta: string | undefined = json.choices?.[0]?.delta?.content;
             if (typeof delta === "string" && delta.length > 0) {
-              if (feedChunk(delta)) {
+              if (applySegments(parser.feed(delta))) {
                 done = true;
                 internalAbort.abort(); // stop the route from billing the hallucinated tail
                 break outer;
@@ -393,7 +302,7 @@ export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
 
         if (!toolCall) {
           // Plain answer: flush any held-back tail, close the text block.
-          if (acc) emitText(acc);
+          applySegments(parser.flush());
           endText();
           output.stopReason = "stop";
         }
@@ -402,7 +311,11 @@ export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
           output.usage.output = usageSeen.output ?? 0;
           output.usage.totalTokens = output.usage.input + output.usage.output;
         }
-        stream.push({ type: "done", reason: output.stopReason as "stop" | "length" | "toolUse", message: output });
+        stream.push({
+          type: "done",
+          reason: output.stopReason as "stop" | "length" | "toolUse",
+          message: output,
+        });
         stream.end();
       } catch (err) {
         const aborted = internalAbort.signal.aborted && !toolCall && !!outerSignal?.aborted;
