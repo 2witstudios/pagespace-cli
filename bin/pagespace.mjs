@@ -77,6 +77,27 @@ async function statusDoctor() {
   }
 }
 
+// Self-contained skills: pi should load ONLY this package's vendored PageSpace-AIDD skills, never the
+// user-global (~/.agents/skills) set. `--no-skills` disables all auto-discovered + package skills; we
+// then re-add exactly our own with one `--skill <dir>` each. Skipped if the user manages skills via
+// their own flags.
+const skillsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "skills");
+function vendoredSkillFlags() {
+  let entries;
+  try {
+    entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const flags = [];
+  for (const e of entries) {
+    if (e.isDirectory() && fs.existsSync(path.join(skillsDir, e.name, "SKILL.md"))) {
+      flags.push("--skill", path.join(skillsDir, e.name));
+    }
+  }
+  return flags;
+}
+
 if (process.argv[2] === "status" || process.argv.includes("--check")) {
   statusDoctor();
 } else {
@@ -85,7 +106,10 @@ if (process.argv[2] === "status" || process.argv.includes("--check")) {
   const passthrough = process.argv.slice(2);
   const quiet = passthrough.includes("-p") || passthrough.includes("--print") || passthrough.includes("--mode");
   if (!quiet) process.stderr.write("pagespace · PageSpace-native pi (dual-mount + PageSpace brain)\n");
-  const args = ["-e", extensionPath, ...passthrough];
+  const userManagesSkills =
+    passthrough.includes("--no-skills") || passthrough.includes("-ns") || passthrough.includes("--skill");
+  const skillFlags = userManagesSkills ? [] : ["--no-skills", ...vendoredSkillFlags()];
+  const args = ["-e", extensionPath, ...skillFlags, ...passthrough];
   const child = spawn("pi", args, { stdio: "inherit" });
   child.on("error", (err) => {
     console.error(

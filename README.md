@@ -99,6 +99,16 @@ pagespace status
 `pagespace` is then equivalent to `pi` with the extension preloaded; `pagespace status` prints the
 config + a live auth ping. (`node bin/pagespace.mjs status` works without `npm link`.)
 
+### Skills are self-contained
+
+The harness ships its own **PageSpace-AIDD** skill set under `skills/` (`pagespace-aidd-*` — a
+rebranded, PageSpace-adapted fork of [AIDD](https://github.com/paralleldrive/aidd), plus
+`pagespace-*` natives). The **`pagespace` launcher is the isolated entrypoint**: it starts pi with
+`--no-skills` and loads *only* these vendored skills, so your user-global `~/.agents/skills` never
+bleed in and there are no skill-name collisions. Plain `pi` (after `pi install -l .`) is the
+non-isolated dev path — it also loads whatever skills you have user-global. The pristine upstream
+originals live in `ai/skills/` (the vendor source; not pi-loaded).
+
 ## Architecture
 
 PageSpace is the substrate — pi's filesystem, model/brain, memory, and task list — wired in

@@ -1,5 +1,5 @@
 ---
-name: aidd-functional-style
+name: pagespace-functional-style
 description: Functional TypeScript style for the pagespace-cli src/ modules. Use when writing or editing harness modules — separate pure logic from side effects so the logic is unit-testable without I/O, keep modules dependency-light, and follow the established module shape (pure helpers + a thin live wrapper + a register*Tool).
 ---
 
