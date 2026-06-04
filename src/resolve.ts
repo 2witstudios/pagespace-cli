@@ -64,8 +64,7 @@ export class PageSpaceResolver {
     if (hits.length === 0) return null;
     if (hits.length > 1) {
       throw new Error(
-        `Ambiguous path segment "${title}": ${hits.length} sibling pages share this title. ` +
-          `Rename one, or address by id.`,
+        `Ambiguous path segment "${title}": ${hits.length} sibling pages share this title. Rename one, or address by id.`,
       );
     }
     return hits[0];
