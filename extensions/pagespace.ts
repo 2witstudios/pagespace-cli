@@ -31,6 +31,7 @@ import { MAX_SUBAGENT_DEPTH, currentDepth, registerSubagentTool } from "../src/s
 import { registerRequirementsTool } from "../src/requirements.ts";
 import { registerReviewTool } from "../src/review.ts";
 import { registerFixTool } from "../src/fix.ts";
+import { registerChurnTool } from "../src/churn.ts";
 import { registerPageSpaceProvider } from "../src/provider.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -145,6 +146,9 @@ export default function (pi: ExtensionAPI) {
       model: config.modelPageId ? `pagespace/${config.modelPageId}` : undefined,
     });
   }
+
+  // Churn (Epic 3): file change-frequency hotspots from git history (a local analysis tool).
+  registerChurnTool(pi, cwd);
 
   // AIDD requirements step (Epic 3): a deterministically-invokable LLM step that derives
   // schema-validated "Given X, should Y" acceptance criteria via the PageSpace brain.
