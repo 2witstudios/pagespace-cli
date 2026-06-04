@@ -10,6 +10,12 @@ export interface PageSpaceConfig {
   mountPrefix: string;
   /** AI_CHAT page id used as pi's model brain: ps-agent://<pageId> (optional until wired). */
   modelPageId: string | undefined;
+  /**
+   * Mount sub-paths (within a drive) the dual-mount write/edit refuse — spec immutability for the
+   * implementer role. E.g. ["Specs", "Epics"]. From PAGESPACE_READONLY (comma-separated). Empty by
+   * default (no restriction) so it never breaks setups that don't opt in.
+   */
+  readOnlyPrefixes: string[];
 }
 
 export function loadConfig(): PageSpaceConfig {
@@ -19,5 +25,9 @@ export function loadConfig(): PageSpaceConfig {
     defaultDriveSlug: process.env.PAGESPACE_DRIVE,
     mountPrefix: process.env.PAGESPACE_MOUNT ?? "pagespace",
     modelPageId: process.env.PAGESPACE_MODEL_PAGE,
+    readOnlyPrefixes: (process.env.PAGESPACE_READONLY ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
 }

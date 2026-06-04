@@ -42,7 +42,11 @@ export default function (pi: ExtensionAPI) {
   const resolver = new PageSpaceResolver(api);
   const cwd = process.cwd();
   const mountRoot = path.resolve(cwd, config.mountPrefix);
-  const ops = createPageSpaceOps(api, resolver, { mountRoot, defaultDriveSlug: config.defaultDriveSlug });
+  const ops = createPageSpaceOps(api, resolver, {
+    mountRoot,
+    defaultDriveSlug: config.defaultDriveSlug,
+    readOnlyPrefixes: config.readOnlyPrefixes,
+  });
 
   const routes = (params: { path?: string }): boolean =>
     ops.isMountPath(path.resolve(cwd, params?.path ?? "."));
