@@ -24,9 +24,12 @@ companion to PageSpace. Active plan: `~/.claude/plans/get-the-pi-dev-repo-compre
 ```
 extensions/pagespace.ts   # pi extension entry (dual-mount adapter + provider register)
 src/                      # helpers (config, api client, resolve, ops, provider) — not pi-loaded
-skills/                   # pi runtime skills (orientation; aidd-* come from ~/.agents/skills)
+skills/                   # self-contained PageSpace-AIDD skills (pagespace-aidd-*, pagespace-*).
+                          #   The `pagespace` launcher loads ONLY these (--no-skills); pi never
+                          #   pulls user-global ~/.agents skills. Rebranded fork of AIDD.
 prompts/                  # pi prompt templates (AIDD workflow commands)
-ai/, aidd-custom/, AGENTS.md   # AIDD framework scaffold (npx aidd)
+ai/, aidd-custom/, AGENTS.md   # upstream AIDD v2.8.0 scaffold (npx aidd) — vendor source for
+                          #   skills/, NOT pi-loaded. Re-vendor from ai/skills/ + rebrand.
 ```
 
 ## State lives in PageSpace + this repo (use the `pagespace` MCP)

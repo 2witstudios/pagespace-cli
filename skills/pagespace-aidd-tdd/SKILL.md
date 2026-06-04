@@ -1,5 +1,5 @@
 ---
-name: aidd-tdd
+name: pagespace-aidd-tdd
 description: Test-driven development discipline for this project. Use when adding or changing behavior — express acceptance criteria as "Given X, should Y", write a failing test first (RED), implement the minimum to pass (GREEN), then refactor. Explains where unit vs live tests go and the gated PR flow.
 ---
 
