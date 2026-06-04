@@ -3,10 +3,43 @@
 // pi with this package's extension preloaded and passes args through. Mirrors src/cli.ts
 // (buildPiLaunchArgs/resolveExtensionPath/checkConfig — kept in TS for unit tests).
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const extensionPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "extensions", "pagespace.ts");
+
+// Source PAGESPACE_* from the nearest .env/.env.local (shell env wins) so `pagespace status` and the
+// spawned pi see the same config. Mirrors src/env.ts (kept here in plain JS — the bin has no TS loader).
+function loadDotenv(startDir = process.cwd()) {
+  let dir = path.resolve(startDir);
+  for (;;) {
+    if (fs.existsSync(path.join(dir, ".env")) || fs.existsSync(path.join(dir, ".env.local"))) break;
+    const parent = path.dirname(dir);
+    if (parent === dir) return;
+    dir = parent;
+  }
+  for (const file of [".env.local", ".env"]) {
+    const p = path.join(dir, file);
+    if (!fs.existsSync(p)) continue;
+    for (const raw of fs.readFileSync(p, "utf8").split("\n")) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) continue;
+      const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+      if (!m) continue;
+      let v = m[2];
+      const quoted = (v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"));
+      if (quoted) v = v.slice(1, -1);
+      else {
+        const h = v.indexOf(" #");
+        if (h !== -1) v = v.slice(0, h);
+        v = v.trim();
+      }
+      if (process.env[m[1]] === undefined || process.env[m[1]] === "") process.env[m[1]] = v;
+    }
+  }
+}
+loadDotenv();
 
 const CONFIG_KEYS = [
   ["PAGESPACE_AUTH_TOKEN", true, "scoped MCP token (Bearer)"],
