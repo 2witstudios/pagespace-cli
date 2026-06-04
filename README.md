@@ -10,12 +10,16 @@ A PageSpace-native `pi` companion (a [pi](https://pi.dev) package).
 ## Quickstart
 
 ```bash
-npm i -g @earendil-works/pi-coding-agent     # 1. install pi
-export PAGESPACE_AUTH_TOKEN="<your scoped token>"   # 2. set your token
-cd pagespace-cli && pi install -l .          #    register this package with pi
-pagespace status                             # 3. verify (env + live auth ping)
-pagespace                                    #    launch a PageSpace-native pi
+npm i -g @earendil-works/pi-coding-agent          # 1. install pi (the CLI)
+export PAGESPACE_AUTH_TOKEN="<your scoped token>"  # 2. your token
+cd pagespace-cli && npm install                    #    install dev deps
+node bin/pagespace.mjs status                      # 3. verify (env + live auth ping)
+pi install -l . && pi                              # 4. register the extension, then launch pi
 ```
+
+`pi install -l .` registers this package's extension with pi, so **plain `pi` loads PageSpace**
+(dual-mount files + the brain + the tools). The optional branded `pagespace` command needs an extra
+`npm link` — see **[Use](#use)**.
 
 ## Auth & config
 
@@ -30,18 +34,30 @@ token; the real `.mcp.json` is gitignored):
 | `PAGESPACE_MODEL_PAGE` | no | Brain agent page id (`ps-agent://<id>`) — pi's model. |
 | `PAGESPACE_READONLY` | no | Comma-separated mount sub-paths the write/edit tools refuse (spec immutability), e.g. `Specs,Epics`. |
 
-Check your setup (env report + a live auth ping):
+Check your setup (env report + a live auth ping) — works without any install step:
 
 ```bash
-pagespace status        # or: node bin/pagespace.mjs status
+node bin/pagespace.mjs status
+# (after `npm link`, equivalently:  pagespace status)
 ```
 
 ## Use
 
+After `pi install -l .`, **plain `pi` loads the PageSpace extension** — that's all you need:
+
 ```bash
-pi install -l .          # register this package with pi (or add the path to .pi/settings.json)
-pagespace                # branded launcher: pi with the PageSpace extension preloaded
-# …equivalently: pi -e ./extensions/pagespace.ts
+pi install -l .          # register this package's extension/skills/prompts with pi
+pi                       # pi now loads PageSpace: dual-mount files + the brain + the tools
+#   …or per-invocation, without installing:   pi -e ./extensions/pagespace.ts
+```
+
+`pi install -l .` does **not** put a `pagespace` command on your PATH — it registers the extension
+for pi. To get the optional **branded `pagespace` command** (and `pagespace status`), link the bin:
+
+```bash
+npm link                 # exposes the `pagespace` bin on your PATH
+pagespace                # ≡ pi with the extension preloaded
+pagespace status         # config + live auth ping
 ```
 
 ## Architecture
