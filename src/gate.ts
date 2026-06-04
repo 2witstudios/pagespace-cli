@@ -12,7 +12,6 @@
  * integration/live-tested.
  */
 import { execFile } from "node:child_process";
-import { Type } from "typebox";
 import type { PageSpaceApi } from "./api.ts";
 
 export interface GateResult {
@@ -117,33 +116,4 @@ export function formatGateResults(r: GatedCompleteResult): string {
     }
   }
   return lines.join("\n");
-}
-
-/** Register the `task_complete` tool — the only path to completion, and it runs the gate first. */
-export function registerTaskCompleteTool(
-  pi: { registerTool: (tool: any) => void },
-  api: PageSpaceApi,
-  cwd: string,
-): void {
-  pi.registerTool({
-    name: "task_complete",
-    label: "task_complete",
-    description:
-      "Request completion of a leaf task. Runs its gate command(s) and marks the PageSpace task completed ONLY if every gate passes (exit 0). You cannot set task status any other way.",
-    parameters: Type.Object({
-      listPageId: Type.String({ description: "The TASK_LIST page id holding the task." }),
-      taskId: Type.String({ description: "The task id (from listTasks / read_page)." }),
-      gates: Type.Array(Type.String(), {
-        description: "The gate command(s) from the leaf's spec (exit 0 = pass).",
-      }),
-    }),
-    async execute(
-      _id: string,
-      params: { listPageId: string; taskId: string; gates: string[] },
-      signal?: AbortSignal,
-    ) {
-      const result = await gatedComplete(api, { ...params, cwd, signal });
-      return { content: [{ type: "text", text: formatGateResults(result) }], details: { result } };
-    },
-  });
 }
