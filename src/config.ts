@@ -12,10 +12,11 @@ export interface PageSpaceConfig {
   modelPageId: string | undefined;
   /**
    * Mount sub-paths (within a drive) the dual-mount write/edit refuse — spec immutability for the
-   * implementer role. E.g. ["Specs", "Epics"]. From PAGESPACE_READONLY (comma-separated). Empty by
-   * default (no restriction) so it never breaks setups that don't opt in.
+   * implementer role. E.g. ["Specs", "Epics"]. From PAGESPACE_READONLY (comma-separated). Optional;
+   * empty/undefined = no restriction, so it never breaks setups that don't opt in. `loadConfig`
+   * always sets it (possibly `[]`); hand-built configs may omit it.
    */
-  readOnlyPrefixes: string[];
+  readOnlyPrefixes?: string[];
 }
 
 export function loadConfig(): PageSpaceConfig {

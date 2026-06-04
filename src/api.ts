@@ -46,25 +46,67 @@ export interface TaskRecord {
   [key: string]: unknown;
 }
 
+/** Transient HTTP statuses worth retrying (rate-limit + gateway/availability). */
+const RETRIABLE_STATUS = new Set([429, 502, 503, 504]);
+
+/** Whether a failure is transient and worth retrying: a retriable status, or a network/fetch error. Pure. */
+export function isRetriable(status?: number, err?: unknown): boolean {
+  if (status !== undefined) return RETRIABLE_STATUS.has(status);
+  if (err === undefined) return false;
+  if (err instanceof TypeError) return true; // fetch network failure surfaces as TypeError
+  const msg = err instanceof Error ? err.message : String(err);
+  return /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|network|timed? ?out/i.test(
+    msg,
+  );
+}
+
+/** Exponential backoff with full-ish jitter, in [delay/2, delay] where delay = min(cap, base·2^attempt). Pure. */
+export function retryDelayMs(attempt: number, base = 300, cap = 5000): number {
+  const delay = Math.min(cap, base * 2 ** attempt);
+  return delay / 2 + Math.random() * (delay / 2);
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 /** Minimal authenticated client for the PageSpace REST API (scoped MCP token). */
 export class PageSpaceApi {
   constructor(private readonly config: PageSpaceConfig) {}
 
-  private async request<T = unknown>(method: string, endpoint: string, body?: unknown): Promise<T> {
+  private async request<T = unknown>(
+    method: string,
+    endpoint: string,
+    body?: unknown,
+    maxRetries = 3,
+  ): Promise<T> {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (this.config.authToken) headers.Authorization = `Bearer ${this.config.authToken}`;
-    const res = await fetch(`${this.config.apiUrl}${endpoint}`, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) {
+    const url = `${this.config.apiUrl}${endpoint}`;
+    const init = { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined };
+
+    for (let attempt = 0; ; attempt++) {
+      let res: Response;
+      try {
+        res = await fetch(url, init);
+      } catch (err) {
+        // fetch threw → network error. Retry transient ones with backoff.
+        if (isRetriable(undefined, err) && attempt < maxRetries) {
+          await sleep(retryDelayMs(attempt));
+          continue;
+        }
+        throw err;
+      }
+      if (!res.ok) {
+        const text = await res.text();
+        if (isRetriable(res.status) && attempt < maxRetries) {
+          await sleep(retryDelayMs(attempt));
+          continue;
+        }
+        throw new Error(`PageSpace ${method} ${endpoint} failed (${res.status}): ${text}`);
+      }
+      // Some endpoints (DELETE) may return an empty body.
       const text = await res.text();
-      throw new Error(`PageSpace ${method} ${endpoint} failed (${res.status}): ${text}`);
+      return (text ? JSON.parse(text) : undefined) as T;
     }
-    // Some endpoints (DELETE) may return an empty body.
-    const text = await res.text();
-    return (text ? JSON.parse(text) : undefined) as T;
   }
 
   listDrives(): Promise<Drive[]> {
