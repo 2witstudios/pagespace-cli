@@ -23,3 +23,34 @@ export function buildPiLaunchArgs(extensionPath: string, userArgs: string[]): st
 export function resolveExtensionPath(fromBinUrl: string): string {
   return path.join(path.dirname(fileURLToPath(fromBinUrl)), "..", "extensions", "pagespace.ts");
 }
+
+export interface ConfigCheck {
+  /** True when all required config is present. */
+  ok: boolean;
+  /** Required keys that are unset. */
+  missing: string[];
+  /** Human-readable report lines. */
+  lines: string[];
+}
+
+const CONFIG_KEYS: { key: string; required: boolean; label: string }[] = [
+  { key: "PAGESPACE_AUTH_TOKEN", required: true, label: "scoped MCP token (Bearer)" },
+  { key: "PAGESPACE_API_URL", required: false, label: "instance URL (default https://pagespace.ai)" },
+  { key: "PAGESPACE_DRIVE", required: false, label: "default drive slug (mount + memory)" },
+  { key: "PAGESPACE_MODEL_PAGE", required: false, label: "brain agent page id (ps-agent://<id>)" },
+];
+
+/** Validate the PageSpace env config and produce a report. Pure; the `status` subcommand mirrors this. */
+export function checkConfig(env: Record<string, string | undefined>): ConfigCheck {
+  const missing: string[] = [];
+  const lines: string[] = ["pagespace config:"];
+  for (const { key, required, label } of CONFIG_KEYS) {
+    const set = !!env[key]?.trim();
+    if (!set && required) missing.push(key);
+    const mark = set ? "✓" : required ? "✗" : "·";
+    lines.push(`  ${mark} ${key}${set ? "" : ` (unset — ${label})`}`);
+  }
+  const ok = missing.length === 0;
+  if (!ok) lines.push("  → copy .mcp.json.example to .mcp.json and set your token, or export the env vars.");
+  return { ok, missing, lines };
+}
