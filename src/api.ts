@@ -36,6 +36,16 @@ export interface RegexMatch {
   totalMatches?: number;
 }
 
+export interface TaskRecord {
+  id: string;
+  title: string;
+  status: string;
+  /** Status group (e.g. "todo" | "in_progress" | "done"). */
+  statusGroup?: string;
+  pageId?: string;
+  [key: string]: unknown;
+}
+
 /** Minimal authenticated client for the PageSpace REST API (scoped MCP token). */
 export class PageSpaceApi {
   constructor(private readonly config: PageSpaceConfig) {}
@@ -95,6 +105,25 @@ export class PageSpaceApi {
   /** Soft-delete (trash) a page. */
   trashPage(pageId: string): Promise<{ message?: string }> {
     return this.request("DELETE", `/api/pages/${pageId}`);
+  }
+
+  /** List the tasks on a TASK_LIST page (the `id` here is the real task id, not the linked page id). */
+  async listTasks(listPageId: string): Promise<TaskRecord[]> {
+    const r = await this.request<{ tasks?: TaskRecord[] }>("GET", `/api/pages/${listPageId}/tasks`);
+    return r.tasks ?? [];
+  }
+
+  /** Create a task on a TASK_LIST page. */
+  createTask(listPageId: string, title: string, extra: Record<string, unknown> = {}): Promise<TaskRecord> {
+    return this.request<TaskRecord>("POST", `/api/pages/${listPageId}/tasks`, { title, ...extra });
+  }
+
+  /**
+   * Set a task's status (e.g. "completed"). The server enforces the roll-up guard — a container task
+   * can't complete while children are open (422 SUBTASKS_INCOMPLETE).
+   */
+  updateTaskStatus(listPageId: string, taskId: string, status: string): Promise<unknown> {
+    return this.request("PATCH", `/api/pages/${listPageId}/tasks/${taskId}`, { status });
   }
 
   /** Line-addressable document ops. `insert` at a huge startLine appends. */
