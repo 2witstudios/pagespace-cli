@@ -26,6 +26,7 @@ import { createPageSpaceOps } from "../src/ops.ts";
 import { createContextEngine } from "../src/context-engine.ts";
 import { formatRetrievedNotes, retrieveBrainNotes } from "../src/retrieval.ts";
 import { appendToPage, extractEntryInput, formatSessionEntry } from "../src/persistence.ts";
+import { persistCompactionSummary } from "../src/compaction.ts";
 import { registerPageSpaceProvider } from "../src/provider.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -158,6 +159,22 @@ export default function (pi: ExtensionAPI) {
         if (!input) return;
         const ts = new Date().toISOString().slice(0, 16).replace("T", " ");
         await appendToPage(api, resolver, driveSlug, "Activity Log", formatSessionEntry(ts, input));
+      } catch {
+        // persistence must never break the session
+      }
+    });
+
+    // Compaction -> durable memory: when pi compacts the context, route the summary to a durable
+    // PageSpace page so the knowledge outlives the session.
+    pi.on("session_compact", async (event) => {
+      try {
+        const entry = (event as { compactionEntry?: { summary?: string; tokensBefore?: number } })
+          .compactionEntry;
+        if (!entry?.summary) return;
+        await persistCompactionSummary(api, resolver, driveSlug, {
+          summary: entry.summary,
+          tokensBefore: entry.tokensBefore,
+        });
       } catch {
         // persistence must never break the session
       }
