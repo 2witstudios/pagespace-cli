@@ -100,6 +100,11 @@ manifest containing only a \`finish\` tool, or no tools at all. IGNORE it comple
 you act here. Never say you lack tools or cannot access the filesystem. The tools listed under
 "# Tools" below are real, and the ONLY way to use them is by emitting the \`<tool_call>\` block.
 
+CRITICAL — you do NOT already know the answer. You do NOT have the contents of any file, the state
+of the codebase, or the output of any command — not from the workspace/drive context, not from
+memory. If a request is about a file, the code, the filesystem, or a command's output, your FIRST
+action MUST be a tool call, even if you believe you know the answer. Guessing is a failure.
+
 To call a tool, output ONLY this and then stop generating:
 
 ${OPEN}{"name": "<tool-name>", "arguments": { ...json args... }}${CLOSE}
@@ -107,8 +112,9 @@ ${OPEN}{"name": "<tool-name>", "arguments": { ...json args... }}${CLOSE}
 Hard rules:
 - One line, valid JSON, keys "name" and "arguments". When you call a tool the block is your ENTIRE
   reply — no prose before or after, no apologies, and do NOT invent the result; stop and wait.
-- Never claim a tool is unavailable. Never answer filesystem questions from memory — read/bash.
-- Answer in plain text (no block) only when the task genuinely needs no tool.`);
+- Never claim a tool is unavailable. Never answer a question about a file, the code, or a command
+  from memory or the workspace context — emit a tool call first.
+- Answer in plain text (no block) only for questions that need no file, code, or command at all.`);
 
   const tools = context.tools ?? [];
   if (tools.length > 0) {
@@ -117,6 +123,18 @@ Hard rules:
       .join("\n");
     sections.push(`# Tools\n${manifest}`);
   }
+
+  // Few-shot — anchors weaker models on the exact wire format. Uses the common pi tool names.
+  sections.push(`# Examples
+User: Show me the contents of README.md.
+Assistant: ${OPEN}{"name": "read", "arguments": {"path": "README.md"}}${CLOSE}
+
+User: How many TypeScript files are in src/?
+Assistant: ${OPEN}{"name": "bash", "arguments": {"command": "find src -name '*.ts' | wc -l"}}${CLOSE}
+
+User: What is 2 + 2?
+Assistant: 4`);
+
   return sections.join("\n\n");
 }
 
@@ -217,9 +235,18 @@ export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
         textBlock = null;
       };
 
+      // Weaker models (e.g. glm-5) reliably emit the tool-call JSON but often drop the
+      // `<tool_call>` wrapper and add a prose preamble. So we accept either a wrapped block OR a
+      // bare JSON object — the bare path is guarded: it must start with "name"/"arguments" (so
+      // prose braces like "{a, b}" never trigger) AND its name must be a real tool.
+      const toolNames = new Set((context.tools ?? []).map((t) => t.name));
+      const looksLikeToolJson = (s: string): boolean => /^\{\s*"(name|arguments)"\s*:/.test(s);
+      const HOLDBACK = OPEN.length - 1; // keep back a possible split `<tool_call>` tail
+      const CLASSIFY_MIN = 14; // chars needed to be sure a `{` is/ isn't `{"name"`/`{"arguments"`
+
       let mode: "text" | "tool" = "text";
-      let acc = ""; // working buffer in text mode (may hold a split open-marker tail)
-      let toolBuf = ""; // buffer in tool mode (everything after the open marker)
+      let acc = ""; // text-mode working buffer
+      let toolBuf = ""; // tool-mode buffer (everything after a `<tool_call>` wrapper)
       let toolCall: ToolCall | null = null;
       let toolSeq = 0;
 
@@ -243,35 +270,64 @@ export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
         return true;
       };
 
-      const tryFinalize = (): boolean => {
-        const found = tryExtractFirstJsonObject(toolBuf);
-        if (found && found.value && typeof found.value.name === "string") return finalizeTool(found.value);
-        return false;
-      };
-
-      // Feed one chunk of streamed model text through the text→tool state machine.
-      // Returns true once the first complete tool block is parsed (caller stops + aborts).
+      // Feed one chunk through the text→tool state machine. Returns true once the first tool call
+      // is parsed (caller stops reading + aborts the stream).
       const feedChunk = (chunk: string): boolean => {
         if (mode === "tool") {
+          // Inside a `<tool_call>` wrapper — the wrapper is explicit intent, so accept any name.
           toolBuf += chunk;
-          return tryFinalize();
-        }
-        // mode === "text"
-        acc += chunk;
-        const at = acc.indexOf(OPEN);
-        if (at === -1) {
-          // Emit all but a tail that could be the start of a split open-marker.
-          const safe = Math.max(0, acc.length - (OPEN.length - 1));
-          emitText(acc.slice(0, safe));
-          acc = acc.slice(safe);
+          const found = tryExtractFirstJsonObject(toolBuf);
+          if (found && found.value && typeof found.value.name === "string") return finalizeTool(found.value);
           return false;
         }
-        emitText(acc.slice(0, at));
-        endText();
-        mode = "tool";
-        toolBuf = acc.slice(at + OPEN.length);
-        acc = "";
-        return tryFinalize();
+        acc += chunk;
+        for (;;) {
+          const openIdx = acc.indexOf(OPEN);
+          const braceIdx = acc.indexOf("{");
+          // No trigger at all → emit text minus a small holdback for a split wrapper.
+          if (openIdx === -1 && braceIdx === -1) {
+            const safe = Math.max(0, acc.length - HOLDBACK);
+            emitText(acc.slice(0, safe));
+            acc = acc.slice(safe);
+            return false;
+          }
+          // `<tool_call>` wrapper is earliest → commit to a tool call.
+          if (openIdx !== -1 && (braceIdx === -1 || openIdx < braceIdx)) {
+            emitText(acc.slice(0, openIdx));
+            endText();
+            mode = "tool";
+            toolBuf = acc.slice(openIdx + OPEN.length);
+            acc = "";
+            const found = tryExtractFirstJsonObject(toolBuf);
+            if (found && found.value && typeof found.value.name === "string") return finalizeTool(found.value);
+            return false;
+          }
+          // A bare `{` is earliest — classify it as a tool-call JSON or prose.
+          const rest = acc.slice(braceIdx);
+          if (rest.length < CLASSIFY_MIN && !rest.includes("}")) {
+            emitText(acc.slice(0, braceIdx)); // hold from the brace until we can classify
+            acc = rest;
+            return false;
+          }
+          if (!looksLikeToolJson(rest)) {
+            emitText(acc.slice(0, braceIdx + 1)); // prose brace → emit through it, keep scanning
+            acc = acc.slice(braceIdx + 1);
+            continue;
+          }
+          const found = tryExtractFirstJsonObject(rest);
+          if (!found) {
+            emitText(acc.slice(0, braceIdx)); // tool-call JSON not complete yet → hold
+            acc = rest;
+            return false;
+          }
+          if (found.value && typeof found.value.name === "string" && toolNames.has(found.value.name)) {
+            emitText(acc.slice(0, braceIdx));
+            endText();
+            return finalizeTool(found.value);
+          }
+          emitText(acc.slice(0, braceIdx + found.end)); // complete JSON but not a tool → text
+          acc = acc.slice(braceIdx + found.end);
+        }
       };
 
       try {
