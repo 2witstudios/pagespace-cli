@@ -24,6 +24,7 @@ import { PageSpaceApi } from "../src/api.ts";
 import { PageSpaceResolver } from "../src/resolve.ts";
 import { createPageSpaceOps } from "../src/ops.ts";
 import { createContextEngine } from "../src/context-engine.ts";
+import { formatRetrievedNotes, retrieveBrainNotes } from "../src/retrieval.ts";
 import { registerPageSpaceProvider } from "../src/provider.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -131,15 +132,21 @@ export default function (pi: ExtensionAPI) {
     void modelId;
   }
 
-  // Deterministic memory (Epic 2): inject the drive's standing context (Vision + indexes + Epics
-  // board) into every session's system prompt, so a stateless agent always grounds on current
-  // drive state. Fetched once per process and cached. Skipped if no default drive is configured.
+  // Deterministic memory (Epic 2): on every turn, inject (1) the drive's standing context (Vision +
+  // indexes + Epics board, fetched once and cached) and (2) the Brain notes most relevant to this
+  // turn's prompt (regex_search + client-side ranking, within a budget). So a stateless agent always
+  // grounds on current drive state and pulls relevant memory without the model having to choose to.
   if (config.defaultDriveSlug) {
-    const contextEngine = createContextEngine(api, resolver, config.defaultDriveSlug);
+    const driveSlug = config.defaultDriveSlug;
+    const contextEngine = createContextEngine(api, resolver, driveSlug);
     pi.on("before_agent_start", async (event) => {
-      const injected = await contextEngine.get().catch(() => "");
-      if (!injected) return undefined;
-      return { systemPrompt: `${event.systemPrompt}\n\n${injected}` };
+      let systemPrompt = event.systemPrompt;
+      const standing = await contextEngine.get().catch(() => "");
+      if (standing) systemPrompt += `\n\n${standing}`;
+      const notes = await retrieveBrainNotes(api, resolver, driveSlug, event.prompt).catch(() => []);
+      const relevant = formatRetrievedNotes(notes);
+      if (relevant) systemPrompt += `\n\n${relevant}`;
+      return systemPrompt === event.systemPrompt ? undefined : { systemPrompt };
     });
   }
 }

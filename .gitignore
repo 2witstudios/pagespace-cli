@@ -9,3 +9,6 @@ auth.json
 
 # Local MCP config holds a scoped PageSpace token — never commit it
 .mcp.json
+
+# Harness-local dir (sessions/settings)
+.claude/
