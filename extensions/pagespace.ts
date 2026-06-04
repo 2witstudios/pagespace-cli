@@ -33,6 +33,7 @@ import { registerReviewTool } from "../src/review.ts";
 import { registerFixTool } from "../src/fix.ts";
 import { registerChurnTool } from "../src/churn.ts";
 import { registerTaskCompleteTool } from "../src/complete.ts";
+import { registerBuildTool } from "../src/build.ts";
 import { registerPageSpaceProvider } from "../src/provider.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -155,6 +156,9 @@ export default function (pi: ExtensionAPI) {
   // + rubric are given) a mandatory review, flipping the PageSpace task to completed only when all
   // pass (no raw status write / no self-complete).
   registerTaskCompleteTool(pi, api, config, cwd);
+
+  // /build loop (Epic 4): advance the spec-gated build by one leaf (pick → spec → gate+review → complete).
+  registerBuildTool(pi, api, config, cwd);
 
   // AIDD requirements step (Epic 3): a deterministically-invokable LLM step that derives
   // schema-validated "Given X, should Y" acceptance criteria via the PageSpace brain.
