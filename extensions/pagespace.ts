@@ -23,6 +23,7 @@ import { loadConfig } from "../src/config.ts";
 import { PageSpaceApi } from "../src/api.ts";
 import { PageSpaceResolver } from "../src/resolve.ts";
 import { createPageSpaceOps } from "../src/ops.ts";
+import { createContextEngine } from "../src/context-engine.ts";
 import { registerPageSpaceProvider } from "../src/provider.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -128,5 +129,17 @@ export default function (pi: ExtensionAPI) {
     const { providerName, modelId } = registerPageSpaceProvider(pi, config);
     void providerName;
     void modelId;
+  }
+
+  // Deterministic memory (Epic 2): inject the drive's standing context (Vision + indexes + Epics
+  // board) into every session's system prompt, so a stateless agent always grounds on current
+  // drive state. Fetched once per process and cached. Skipped if no default drive is configured.
+  if (config.defaultDriveSlug) {
+    const contextEngine = createContextEngine(api, resolver, config.defaultDriveSlug);
+    pi.on("before_agent_start", async (event) => {
+      const injected = await contextEngine.get().catch(() => "");
+      if (!injected) return undefined;
+      return { systemPrompt: `${event.systemPrompt}\n\n${injected}` };
+    });
   }
 }
