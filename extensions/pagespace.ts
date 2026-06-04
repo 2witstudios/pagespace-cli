@@ -32,6 +32,7 @@ import { registerRequirementsTool } from "../src/requirements.ts";
 import { registerReviewTool } from "../src/review.ts";
 import { registerFixTool } from "../src/fix.ts";
 import { registerChurnTool } from "../src/churn.ts";
+import { registerTaskCompleteTool } from "../src/gate.ts";
 import { registerPageSpaceProvider } from "../src/provider.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -149,6 +150,10 @@ export default function (pi: ExtensionAPI) {
 
   // Churn (Epic 3): file change-frequency hotspots from git history (a local analysis tool).
   registerChurnTool(pi, cwd);
+
+  // Gated task_complete (Epic 4): the only path to completion — runs the leaf's gate and flips the
+  // PageSpace task to completed only when every gate passes (no raw status write / no self-complete).
+  registerTaskCompleteTool(pi, api, cwd);
 
   // AIDD requirements step (Epic 3): a deterministically-invokable LLM step that derives
   // schema-validated "Given X, should Y" acceptance criteria via the PageSpace brain.
