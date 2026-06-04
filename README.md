@@ -7,6 +7,16 @@ A PageSpace-native `pi` companion (a [pi](https://pi.dev) package).
 - **PageSpace as the model brain:** pi's LLM calls go to PageSpace `POST /api/v1/chat/completions`
   (model `ps-agent://<pageId>`); a prompted-tool shim keeps the tool loop entirely in pi.
 
+## Quickstart
+
+```bash
+npm i -g @earendil-works/pi-coding-agent     # 1. install pi
+export PAGESPACE_AUTH_TOKEN="<your scoped token>"   # 2. set your token
+cd pagespace-cli && pi install -l .          #    register this package with pi
+pagespace status                             # 3. verify (env + live auth ping)
+pagespace                                    #    launch a PageSpace-native pi
+```
+
 ## Auth & config
 
 Configure via environment variables (or `.mcp.json` — copy `.mcp.json.example` and fill in your
@@ -54,5 +64,20 @@ npm run test:live        # live integration tests — needs PAGESPACE_AUTH_TOKEN
 
 Contributions go through PRs to `main`; CI (`.github/workflows/ci.yml`) runs typecheck, lint, and
 unit tests on every PR and must pass before merge. Conventional commits.
+
+## Install & distribution
+
+This is a pi package: `pi` discovers its extension/skills/prompts once registered.
+
+```bash
+pi install -l .        # register the local package with pi (dev)
+npm link               # …or expose the `pagespace` bin on your PATH
+npm pack               # build a tarball (pagespace-cli-<version>.tgz) to share/install
+```
+
+The package is `private` (not published to npm). To publish later (a human decision): set
+`"private": false`, confirm `name`/`version`/`files`/`bin`, then `npm publish`. `files` already
+ships `extensions`, `src`, `skills`, `prompts`, `bin`, and the README; the pi peer deps
+(`@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `typebox`) stay peer dependencies.
 
 Status and plan tracked in PageSpace (drive `pagespace-cli`): see the **Brain** and **Epics** pages.
