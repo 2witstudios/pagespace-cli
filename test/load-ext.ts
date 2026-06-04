@@ -21,6 +21,22 @@ if (missing.length) {
   process.exit(1);
 }
 
+// Separation of duties: completion goes ONLY through the gated task_complete/build. The implementer
+// must NOT be handed any raw status-write tool that bypasses the gate.
+for (const required of ["task_complete", "build"]) {
+  if (!registered.includes(required)) {
+    console.log(`FAIL: gated tool "${required}" not registered`);
+    process.exit(1);
+  }
+}
+const FORBIDDEN = ["update_task", "set_status", "set_task_status", "complete_task", "task_status"];
+const leaked = registered.filter((n) => FORBIDDEN.includes(n));
+if (leaked.length) {
+  console.log("FAIL: raw status-write tool(s) exposed (bypasses the gate):", leaked.join(", "));
+  process.exit(1);
+}
+console.log("PASS: gated completion only (task_complete + build; no raw status-write tool)");
+
 // Provider registration is gated on PAGESPACE_MODEL_PAGE; assert it when configured.
 if (process.env.PAGESPACE_MODEL_PAGE) {
   const p = providers.find((x) => x.name === "pagespace");

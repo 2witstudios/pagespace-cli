@@ -37,6 +37,23 @@ export interface PageSpaceOpsConfig {
   defaultContentMode?: "markdown" | "html";
   /** Drive slug used by `grepSearch` when the search path is the bare mount root (no drive). */
   defaultDriveSlug?: string;
+  /** Mount sub-paths (within a drive) that write/edit refuse — spec immutability. E.g. ["Specs"]. */
+  readOnlyPrefixes?: string[];
+}
+
+/**
+ * True when a mount-relative path (`drive/seg/seg…`) falls under a read-only prefix (matched on the
+ * path *within* the drive). Pure. `["Specs"]` protects `drive/Specs/*` (and the `Specs` page itself).
+ */
+export function isReadOnly(mountRelPath: string, prefixes: string[]): boolean {
+  if (prefixes.length === 0) return false;
+  const parts = mountRelPath.split("/").filter((p) => p.length > 0);
+  const withinDrive = parts.slice(1).join("/"); // drop the drive slug
+  if (!withinDrive) return false;
+  return prefixes.some((raw) => {
+    const p = raw.replace(/^\/+|\/+$/g, "");
+    return p.length > 0 && (withinDrive === p || withinDrive.startsWith(`${p}/`));
+  });
 }
 
 /** pi's grep tool params (the subset we honor). */
@@ -191,6 +208,7 @@ export function createPageSpaceOps(
 ): PageSpaceOps {
   const mountRoot = norm(config.mountRoot);
   const contentMode = config.defaultContentMode ?? "markdown";
+  const readOnlyPrefixes = config.readOnlyPrefixes ?? [];
 
   const isMountPath = (absolutePath: string): boolean => {
     const p = norm(absolutePath);
@@ -211,6 +229,9 @@ export function createPageSpaceOps(
 
   const writeStr = async (absolutePath: string, content: string): Promise<void> => {
     const rel = toMountRel(absolutePath);
+    if (isReadOnly(rel, readOnlyPrefixes)) {
+      throw new Error(`EACCES: "${rel}" is read-only (spec immutability); the implementer cannot edit it.`);
+    }
     const r = await resolver.resolve(rel);
     if (r.page) {
       await api.patchPage(r.page.id, { content });
