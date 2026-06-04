@@ -23,7 +23,7 @@
     "lint": "biome check src extensions test",
     "format": "biome format --write src extensions test",
     "test": "tsx --test test/unit/*.test.ts",
-    "test:live": "tsx test/run-ops.ts && tsx test/run-grep.ts && tsx test/load-ext.ts && tsx test/run-provider.ts",
+    "test:live": "tsx test/run-ops.ts && tsx test/run-grep.ts && tsx test/run-context.ts && tsx test/load-ext.ts && tsx test/run-provider.ts",
     "check": "npm run typecheck && npm run lint && npm run test",
     "prepare": "husky"
   },

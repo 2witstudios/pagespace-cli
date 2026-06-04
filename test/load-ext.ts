@@ -3,9 +3,10 @@
 import ext from "../extensions/pagespace.ts";
 const registered: string[] = [];
 const providers: Array<{ name: string; config: any }> = [];
+const events: string[] = [];
 const mockPi: any = {
   registerTool: (t: { name: string }) => registered.push(t.name),
-  on: () => {},
+  on: (event: string) => events.push(event),
   registerCommand: () => {},
   registerProvider: (name: string, config: any) => providers.push({ name, config }),
   registerShortcut: () => {},
@@ -39,5 +40,15 @@ if (process.env.PAGESPACE_MODEL_PAGE) {
   console.log("PASS: pagespace model provider registered (streamSimple, api, model id)");
 } else {
   console.log("note: PAGESPACE_MODEL_PAGE unset — provider registration skipped (as designed)");
+}
+// Context auto-load (Epic 2) registers a before_agent_start hook when a default drive is configured.
+if (process.env.PAGESPACE_DRIVE) {
+  if (!events.includes("before_agent_start")) {
+    console.log("FAIL: before_agent_start context hook not registered");
+    process.exit(1);
+  }
+  console.log("PASS: before_agent_start context-injection hook registered");
+} else {
+  console.log("note: PAGESPACE_DRIVE unset — context hook skipped (as designed)");
 }
 console.log("PASS: extension loads and registers", registered.length, "tools (6 routed + smoke)");
