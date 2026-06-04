@@ -47,7 +47,12 @@ async function statusDoctor() {
 if (process.argv[2] === "status" || process.argv.includes("--check")) {
   statusDoctor();
 } else {
-  const args = ["-e", extensionPath, ...process.argv.slice(2)];
+  // Banner to stderr so it never pollutes stdout / --mode json. Suppressed in non-interactive (-p)
+  // and json/rpc modes to keep machine output clean.
+  const passthrough = process.argv.slice(2);
+  const quiet = passthrough.includes("-p") || passthrough.includes("--print") || passthrough.includes("--mode");
+  if (!quiet) process.stderr.write("pagespace · PageSpace-native pi (dual-mount + PageSpace brain)\n");
+  const args = ["-e", extensionPath, ...passthrough];
   const child = spawn("pi", args, { stdio: "inherit" });
   child.on("error", (err) => {
     console.error(
