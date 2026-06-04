@@ -28,6 +28,7 @@ import { formatRetrievedNotes, retrieveBrainNotes } from "../src/retrieval.ts";
 import { appendToPage, extractEntryInput, formatSessionEntry } from "../src/persistence.ts";
 import { persistCompactionSummary } from "../src/compaction.ts";
 import { MAX_SUBAGENT_DEPTH, currentDepth, registerSubagentTool } from "../src/subagent.ts";
+import { registerRequirementsTool } from "../src/requirements.ts";
 import { registerPageSpaceProvider } from "../src/provider.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -141,6 +142,12 @@ export default function (pi: ExtensionAPI) {
     registerSubagentTool(pi, {
       model: config.modelPageId ? `pagespace/${config.modelPageId}` : undefined,
     });
+  }
+
+  // AIDD requirements step (Epic 3): a deterministically-invokable LLM step that derives
+  // schema-validated "Given X, should Y" acceptance criteria via the PageSpace brain.
+  if (config.modelPageId) {
+    registerRequirementsTool(pi, config);
   }
 
   // Deterministic memory (Epic 2): on every turn, inject (1) the drive's standing context (Vision +
