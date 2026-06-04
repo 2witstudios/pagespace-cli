@@ -23,7 +23,7 @@
     "lint": "biome check src extensions test",
     "format": "biome format --write src extensions test",
     "test": "tsx --test --test-reporter=dot test/unit/*.test.ts",
-    "test:live": "tsx test/run-ops.ts && tsx test/run-grep.ts && tsx test/run-context.ts && tsx test/run-retrieval.ts && tsx test/run-persistence.ts && tsx test/run-compaction.ts && tsx test/run-requirements.ts && tsx test/run-review.ts && tsx test/run-fix.ts && tsx test/run-spec.ts && tsx test/run-gate.ts && tsx test/run-complete.ts && tsx test/run-churn.ts && tsx test/load-ext.ts && tsx test/run-provider.ts",
+    "test:live": "tsx test/run-ops.ts && tsx test/run-grep.ts && tsx test/run-context.ts && tsx test/run-retrieval.ts && tsx test/run-persistence.ts && tsx test/run-compaction.ts && tsx test/run-requirements.ts && tsx test/run-review.ts && tsx test/run-fix.ts && tsx test/run-spec.ts && tsx test/run-gate.ts && tsx test/run-complete.ts && tsx test/run-build.ts && tsx test/run-churn.ts && tsx test/load-ext.ts && tsx test/run-provider.ts",
     "check": "npm run typecheck && npm run lint && npm run test",
     "prepare": "husky"
   },
