@@ -69,6 +69,25 @@ Follow the AIDD workflow (`/discover`, `/task`, `/execute`, `/aidd-fix`, `/revie
 the `aidd-*` skills. Plan/specs/tasks live as PageSpace pages, not local `tasks/*.md`. Code lives in
 this repo. Verify with real runs before marking a task Done.
 
+## Dev workflow — autonomous, gated (GitHub: `2witstudios/pagespace-cli`, public)
+
+The repo is set up to run hands-off. **Never commit straight to `main`** (branch-protected, requires
+the CI check via a PR). The loop, per task/epic:
+1. `git checkout main && git pull` → branch `feat/<slug>` (or `fix/`, `chore/`, `refactor/`, `docs/`).
+2. Implement in small steps. Add/extend **unit tests** in `test/unit/` for pure logic (no network).
+3. `npm run check` (typecheck + biome lint + unit tests) — also the **husky pre-commit** gate. For
+   PageSpace-touching changes, also `npm run test:live` (needs `PAGESPACE_AUTH_TOKEN` +
+   `PAGESPACE_MODEL_PAGE`; live tests stay out of CI by design).
+4. **Conventional commits** (`feat:`/`fix:`/`refactor:`/`build:`/`test:`/`docs:`/`chore:`).
+5. `git push -u origin <branch>` → `gh pr create` → CI runs (`typecheck · lint · unit tests`).
+   When green, `gh pr merge --merge --delete-branch`. CI must pass; no human review is required.
+6. Update the PageSpace **Epics** board (`update_task` → done), **Activity Log**, and any **Brain**
+   notes. Re-ground from the drive before the next item. Keep secrets out of git — `.mcp.json` is
+   gitignored (token leaks were purged from history before going public).
+
+Commands: `npm run typecheck` · `npm run lint` (`format`) · `npm test` (unit) · `npm run test:live`
+· `npm run check`. CI config: `.github/workflows/ci.yml`. Pre-commit: `.husky/pre-commit`.
+
 ## Env
 
 `PAGESPACE_API_URL` (default `https://pagespace.ai`), `PAGESPACE_AUTH_TOKEN` (scoped MCP token),
