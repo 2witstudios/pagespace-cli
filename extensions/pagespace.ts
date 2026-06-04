@@ -27,6 +27,7 @@ import { createContextEngine } from "../src/context-engine.ts";
 import { formatRetrievedNotes, retrieveBrainNotes } from "../src/retrieval.ts";
 import { appendToPage, extractEntryInput, formatSessionEntry } from "../src/persistence.ts";
 import { persistCompactionSummary } from "../src/compaction.ts";
+import { MAX_SUBAGENT_DEPTH, currentDepth, registerSubagentTool } from "../src/subagent.ts";
 import { registerPageSpaceProvider } from "../src/provider.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -132,6 +133,14 @@ export default function (pi: ExtensionAPI) {
     const { providerName, modelId } = registerPageSpaceProvider(pi, config);
     void providerName;
     void modelId;
+  }
+
+  // Fan-out / sub-agent primitive (Epic 3): spawn parallel PageSpace-native pi children for
+  // independent sub-tasks. Only registered above the max nesting depth so sub-agents can't recurse.
+  if (currentDepth() < MAX_SUBAGENT_DEPTH) {
+    registerSubagentTool(pi, {
+      model: config.modelPageId ? `pagespace/${config.modelPageId}` : undefined,
+    });
   }
 
   // Deterministic memory (Epic 2): on every turn, inject (1) the drive's standing context (Vision +
