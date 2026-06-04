@@ -9,17 +9,24 @@ A PageSpace-native `pi` companion (a [pi](https://pi.dev) package).
 
 ## Quickstart
 
+Run these **from inside the cloned repo**. `pi install -l .` registers your *current directory* with
+pi — running it from the wrong folder (e.g. your home) registers the wrong path and breaks `pi`.
+
 ```bash
-npm i -g @earendil-works/pi-coding-agent          # 1. install pi (the CLI)
-export PAGESPACE_AUTH_TOKEN="<your scoped token>"  # 2. your token
-cd pagespace-cli && npm install                    #    install dev deps
-node bin/pagespace.mjs status                      # 3. verify (env + live auth ping)
-pi install -l . && pi                              # 4. register the extension, then launch pi
+npm i -g @earendil-works/pi-coding-agent
+cd path/to/pagespace-cli
+npm install
+export PAGESPACE_AUTH_TOKEN="<your scoped token>"
+node bin/pagespace.mjs status
+pi install -l .
+pi
 ```
 
-`pi install -l .` registers this package's extension with pi, so **plain `pi` loads PageSpace**
-(dual-mount files + the brain + the tools). The optional branded `pagespace` command needs an extra
-`npm link` — see **[Use](#use)**.
+After `pi install -l .`, **plain `pi` loads PageSpace** (dual-mount files + the brain + the tools).
+The optional branded `pagespace` command needs an extra `npm link` — see [Use](#use).
+
+> Tip: paste commands one line at a time. zsh doesn't treat `#` as a comment by default, so pasting a
+> trailing `# …` (or one with `( )`) will error.
 
 ## Auth & config
 
@@ -38,27 +45,36 @@ Check your setup (env report + a live auth ping) — works without any install s
 
 ```bash
 node bin/pagespace.mjs status
-# (after `npm link`, equivalently:  pagespace status)
 ```
+
+After `npm link` (see [Use](#use)), `pagespace status` is equivalent.
 
 ## Use
 
-After `pi install -l .`, **plain `pi` loads the PageSpace extension** — that's all you need:
+After `pi install -l .` (run **from inside the repo**), **plain `pi` loads the PageSpace extension** —
+that's all you need:
 
 ```bash
-pi install -l .          # register this package's extension/skills/prompts with pi
-pi                       # pi now loads PageSpace: dual-mount files + the brain + the tools
-#   …or per-invocation, without installing:   pi -e ./extensions/pagespace.ts
+cd path/to/pagespace-cli
+pi install -l .
+pi
 ```
 
-`pi install -l .` does **not** put a `pagespace` command on your PATH — it registers the extension
-for pi. To get the optional **branded `pagespace` command** (and `pagespace status`), link the bin:
+`pi install -l .` registers the extension/skills/prompts for pi; it does **not** put a `pagespace`
+command on your PATH. To run pi with the extension without installing, use
+`pi -e ./extensions/pagespace.ts` from inside the repo.
+
+To get the optional **branded `pagespace` command** (and `pagespace status`), link the bin from inside
+the repo:
 
 ```bash
-npm link                 # exposes the `pagespace` bin on your PATH
-pagespace                # ≡ pi with the extension preloaded
-pagespace status         # config + live auth ping
+npm link
+pagespace
+pagespace status
 ```
+
+`pagespace` is then equivalent to `pi` with the extension preloaded; `pagespace status` prints the
+config + a live auth ping. (`node bin/pagespace.mjs status` works without `npm link`.)
 
 ## Architecture
 
@@ -123,13 +139,20 @@ The project's plan, knowledge, and task board live in the **PageSpace `pagespace
 ## Development
 
 ```bash
-npm install              # deps + husky pre-commit hook
-npm run typecheck        # tsc --noEmit
-npm run lint             # biome (also: npm run format)
-npm test                 # unit tests (no network)
-npm run check            # typecheck + lint + unit tests (also the pre-commit gate)
-npm run test:live        # live integration tests — needs PAGESPACE_AUTH_TOKEN + PAGESPACE_MODEL_PAGE
+npm install
+npm run typecheck
+npm run lint
+npm test
+npm run check
+npm run test:live
 ```
+
+- `npm install` — deps + the husky pre-commit hook.
+- `npm run typecheck` — `tsc --noEmit`.
+- `npm run lint` — biome; `npm run format` rewrites in place.
+- `npm test` — unit tests, no network.
+- `npm run check` — typecheck + lint + unit tests; this is also the pre-commit gate.
+- `npm run test:live` — live integration tests; needs `PAGESPACE_AUTH_TOKEN` + `PAGESPACE_MODEL_PAGE`.
 
 Contributions go through PRs to `main`; CI (`.github/workflows/ci.yml`) runs typecheck, lint, and
 unit tests on every PR and must pass before merge. Conventional commits.
@@ -139,10 +162,14 @@ unit tests on every PR and must pass before merge. Conventional commits.
 This is a pi package: `pi` discovers its extension/skills/prompts once registered.
 
 ```bash
-pi install -l .        # register the local package with pi (dev)
-npm link               # …or expose the `pagespace` bin on your PATH
-npm pack               # build a tarball (pagespace-cli-<version>.tgz) to share/install
+pi install -l .
+npm link
+npm pack
 ```
+
+- `pi install -l .` — register the local package with pi (dev).
+- `npm link` — expose the `pagespace` bin on your PATH.
+- `npm pack` — build a shareable tarball named `pagespace-cli-VERSION.tgz`.
 
 The package is `private` (not published to npm). To publish later (a human decision): set
 `"private": false`, confirm `name`/`version`/`files`/`bin`, then `npm publish`. `files` already
