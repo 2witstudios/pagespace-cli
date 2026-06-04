@@ -29,6 +29,7 @@ import { appendToPage, extractEntryInput, formatSessionEntry } from "../src/pers
 import { persistCompactionSummary } from "../src/compaction.ts";
 import { MAX_SUBAGENT_DEPTH, currentDepth, registerSubagentTool } from "../src/subagent.ts";
 import { registerRequirementsTool } from "../src/requirements.ts";
+import { registerReviewTool } from "../src/review.ts";
 import { registerPageSpaceProvider } from "../src/provider.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -148,6 +149,8 @@ export default function (pi: ExtensionAPI) {
   // schema-validated "Given X, should Y" acceptance criteria via the PageSpace brain.
   if (config.modelPageId) {
     registerRequirementsTool(pi, config);
+    // Review-as-gate (Epic 3): judge WORK against a RUBRIC; a blocker fails the gate (code-decided).
+    registerReviewTool(pi, config);
   }
 
   // Deterministic memory (Epic 2): on every turn, inject (1) the drive's standing context (Vision +
