@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "pagespace": {
+      "command": "npx",
+      "args": ["-y", "pagespace-mcp@latest"],
+      "env": {
+        "PAGESPACE_API_URL": "https://pagespace.ai",
+        "PAGESPACE_AUTH_TOKEN": "<your-scoped-pagespace-mcp-token>"
+      }
+    }
+  }
+}

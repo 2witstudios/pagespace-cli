@@ -6,3 +6,6 @@ dist/
 .env.*
 .pi/
 auth.json
+
+# Local MCP config holds a scoped PageSpace token — never commit it
+.mcp.json
