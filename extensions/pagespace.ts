@@ -30,6 +30,7 @@ import { persistCompactionSummary } from "../src/compaction.ts";
 import { MAX_SUBAGENT_DEPTH, currentDepth, registerSubagentTool } from "../src/subagent.ts";
 import { registerRequirementsTool } from "../src/requirements.ts";
 import { registerReviewTool } from "../src/review.ts";
+import { registerFixTool } from "../src/fix.ts";
 import { registerPageSpaceProvider } from "../src/provider.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -151,6 +152,8 @@ export default function (pi: ExtensionAPI) {
     registerRequirementsTool(pi, config);
     // Review-as-gate (Epic 3): judge WORK against a RUBRIC; a blocker fails the gate (code-decided).
     registerReviewTool(pi, config);
+    // Fix step (Epic 3): diagnose a failure + propose a concrete minimal fix (the TDD-loop reasoning).
+    registerFixTool(pi, config);
   }
 
   // Deterministic memory (Epic 2): on every turn, inject (1) the drive's standing context (Vision +
