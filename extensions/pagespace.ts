@@ -25,6 +25,7 @@ import { PageSpaceResolver } from "../src/resolve.ts";
 import { createPageSpaceOps } from "../src/ops.ts";
 import { createContextEngine } from "../src/context-engine.ts";
 import { formatRetrievedNotes, retrieveBrainNotes } from "../src/retrieval.ts";
+import { appendToPage, extractEntryInput, formatSessionEntry } from "../src/persistence.ts";
 import { registerPageSpaceProvider } from "../src/provider.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -147,6 +148,19 @@ export default function (pi: ExtensionAPI) {
       const relevant = formatRetrievedNotes(notes);
       if (relevant) systemPrompt += `\n\n${relevant}`;
       return systemPrompt === event.systemPrompt ? undefined : { systemPrompt };
+    });
+
+    // Auto-persist on lifecycle: when the agent finishes handling a request, append a concise entry
+    // to the drive's Activity Log so progress is durably recorded without the model choosing to.
+    pi.on("agent_end", async (event) => {
+      try {
+        const input = extractEntryInput((event.messages ?? []) as { role?: string; content?: unknown }[]);
+        if (!input) return;
+        const ts = new Date().toISOString().slice(0, 16).replace("T", " ");
+        await appendToPage(api, resolver, driveSlug, "Activity Log", formatSessionEntry(ts, input));
+      } catch {
+        // persistence must never break the session
+      }
     });
   }
 }
