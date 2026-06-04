@@ -44,10 +44,63 @@ pagespace                # branded launcher: pi with the PageSpace extension pre
 # …equivalently: pi -e ./extensions/pagespace.ts
 ```
 
+## Architecture
+
+PageSpace is the substrate — pi's filesystem, model/brain, memory, and task list — wired in
+**deterministically** (code that runs every turn) rather than left to the model's discretion. One pi
+extension (`extensions/pagespace.ts`) composes it all.
+
+### Two axes
+- **Dual-mount files.** pi's `read`/`write`/`edit`/`ls`/`find`/`grep` are routed by path: anything
+  under `pagespace/<drive>/…` operates on PageSpace pages (`src/ops.ts` over the REST client
+  `src/api.ts` + a path↔page resolver `src/resolve.ts`); everything else is the local repo; `bash`
+  stays local. `grep` under the mount uses the drive's server-side `regex_search`.
+- **PageSpace brain.** pi's LLM calls go to PageSpace `POST /api/v1/chat/completions`
+  (model `ps-agent://<pageId>`). The route ignores client `tools`, so a **prompted-tool shim**
+  (`src/tool-call-parser.ts` + `src/provider.ts`) injects pi's tool manifest, parses the model's
+  `<tool_call>`/bare-JSON back into pi tool calls, and aborts the stream — the whole tool loop stays
+  in pi. Tuned to be reliable on the managed `glm-5` tier.
+
+### Deterministic memory engine (Epic 2)
+- **Context auto-load** (`before_agent_start`): injects the drive's `Vision` + `_index` + Brain index
+  + Epics board into every session (`src/context-engine.ts`).
+- **Per-turn retrieval**: keyword-searches the Brain for the turn's prompt and injects the top notes
+  within a budget (`src/retrieval.ts`).
+- **Auto-persist** (`agent_end`): appends a concise entry to the `Activity Log` (`src/persistence.ts`).
+- **Compaction → durable memory** (`session_compact`): writes the summary to a durable `Sessions`
+  page (`src/compaction.ts`).
+
+### AIDD as harness modules (Epic 3)
+Judgment steps run as **deterministically-invoked LLM steps** over `src/brain.ts`, with their output
+validated in code: `requirements` (schema-validated Given/should), `review` (a gate verdict), `fix`
+(diagnose + propose). Plus `churn` (git hotspots), a `subagent` fan-out primitive (spawns
+`pi --mode json` children), and discretionary guidance **skills** under `skills/`.
+
+### Spec-gated `/build` engine (Epic 4)
+"Done" is enforced, not claimed. Each leaf's spec page carries `Given X, should Y` + runnable
+`gate:` commands (`src/spec.ts`). The flow: pick the next unblocked leaf (dependency-aware via
+`depends-on:`) → implement → **shell gate** (`src/gate.ts`) → **mandatory review** (`src/review.ts`)
+→ gated completion (`src/complete.ts` flips status only when both pass — the agent has no raw
+status-write tool, only `task_complete`/`build`). **Separation of duties**: specs are read-only to
+the implementer (`PAGESPACE_READONLY`); only the gate-runner completes. **Rails** (`src/rails.ts`):
+per-leaf attempt caps + a budget guard (escalate, never relax the spec). The `/build` loop driver is
+`src/build.ts`.
+
+### Registered tools
+`read` · `write` · `edit` · `ls` · `find` · `grep` · `bash` (pi built-in) · `pagespace_status` ·
+`subagent` · `churn` · `task_complete` · `build` — and, when a brain page is configured,
+`requirements` · `review` · `fix`. Plus the `pagespace` model provider and the memory/persistence hooks.
+
+The project's plan, knowledge, and task board live in the **PageSpace `pagespace-cli` drive** (see its
+`Brain`, `Vision`, `Epics`, and `Activity Log` pages) — the source of truth a stateless agent grounds on.
+
 ## Layout
 
-- `extensions/pagespace.ts` — the pi extension (dual-mount adapter + model provider)
-- `src/` — helpers (config, PageSpace API client, path↔page resolver, ops, provider, tool-call parser)
+- `extensions/pagespace.ts` — the pi extension (dual-mount adapter + provider + memory hooks + AIDD/build tools)
+- `src/` — modules (config, api, resolve, ops, tool-call-parser, provider; context-engine, retrieval,
+  persistence, compaction; brain, requirements, review, fix, churn, subagent; spec, gate, complete,
+  build, rails; cli)
+- `bin/pagespace.mjs` — the branded launcher (+ `pagespace status` doctor)
 - `skills/`, `prompts/` — pi runtime skills + AIDD workflow prompts
 - `test/unit/` — fast, network-free unit tests (run in CI); `test/run-*.ts` — live integration tests
 
