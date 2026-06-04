@@ -15,7 +15,10 @@ ext(mockPi);
 const expect = ["read", "write", "edit", "ls", "find", "grep", "pagespace_status"];
 const missing = expect.filter((n) => !registered.includes(n));
 console.log("registered:", registered.join(", "));
-if (missing.length) { console.log("FAIL missing:", missing.join(", ")); process.exit(1); }
+if (missing.length) {
+  console.log("FAIL missing:", missing.join(", "));
+  process.exit(1);
+}
 
 // Provider registration is gated on PAGESPACE_MODEL_PAGE; assert it when configured.
 if (process.env.PAGESPACE_MODEL_PAGE) {
@@ -26,7 +29,13 @@ if (process.env.PAGESPACE_MODEL_PAGE) {
     p.config.api === "openai-completions" &&
     Array.isArray(p.config.models) &&
     p.config.models[0]?.id === process.env.PAGESPACE_MODEL_PAGE;
-  if (!okProvider) { console.log("FAIL: pagespace provider not registered correctly:", JSON.stringify(p?.config && { ...p.config, streamSimple: typeof p.config.streamSimple })); process.exit(1); }
+  if (!okProvider) {
+    console.log(
+      "FAIL: pagespace provider not registered correctly:",
+      JSON.stringify(p?.config && { ...p.config, streamSimple: typeof p.config.streamSimple }),
+    );
+    process.exit(1);
+  }
   console.log("PASS: pagespace model provider registered (streamSimple, api, model id)");
 } else {
   console.log("note: PAGESPACE_MODEL_PAGE unset — provider registration skipped (as designed)");

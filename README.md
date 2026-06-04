@@ -18,10 +18,27 @@ pi install -l .          # or add this path to .pi/settings.json
 pi                       # /reload after edits
 ```
 
+Copy `.mcp.json.example` to `.mcp.json` and fill in your token (the real `.mcp.json` is gitignored).
+
 ## Layout
 
 - `extensions/pagespace.ts` — the pi extension (dual-mount adapter + model provider)
-- `src/` — helpers (config, PageSpace API client, path↔page resolver, ops, provider)
+- `src/` — helpers (config, PageSpace API client, path↔page resolver, ops, provider, tool-call parser)
 - `skills/`, `prompts/` — pi runtime skills + AIDD workflow prompts
+- `test/unit/` — fast, network-free unit tests (run in CI); `test/run-*.ts` — live integration tests
 
-Status and plan tracked in PageSpace (drive `pagespace-cli`): see the **Brain** and **Tasks** pages.
+## Development
+
+```bash
+npm install              # deps + husky pre-commit hook
+npm run typecheck        # tsc --noEmit
+npm run lint             # biome (also: npm run format)
+npm test                 # unit tests (no network)
+npm run check            # typecheck + lint + unit tests (also the pre-commit gate)
+npm run test:live        # live integration tests — needs PAGESPACE_AUTH_TOKEN + PAGESPACE_MODEL_PAGE
+```
+
+Contributions go through PRs to `main`; CI (`.github/workflows/ci.yml`) runs typecheck, lint, and
+unit tests on every PR and must pass before merge. Conventional commits.
+
+Status and plan tracked in PageSpace (drive `pagespace-cli`): see the **Brain** and **Epics** pages.

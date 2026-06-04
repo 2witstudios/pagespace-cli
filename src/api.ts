@@ -17,14 +17,7 @@ export interface Page {
   children?: Page[];
 }
 
-export type PageType =
-  | "FOLDER"
-  | "DOCUMENT"
-  | "CHANNEL"
-  | "AI_CHAT"
-  | "CANVAS"
-  | "SHEET"
-  | "TASK_LIST";
+export type PageType = "FOLDER" | "DOCUMENT" | "CHANNEL" | "AI_CHAT" | "CANVAS" | "SHEET" | "TASK_LIST";
 
 export interface DocumentResult {
   pageId: string;
@@ -47,11 +40,7 @@ export interface RegexMatch {
 export class PageSpaceApi {
   constructor(private readonly config: PageSpaceConfig) {}
 
-  private async request<T = unknown>(
-    method: string,
-    endpoint: string,
-    body?: unknown,
-  ): Promise<T> {
+  private async request<T = unknown>(method: string, endpoint: string, body?: unknown): Promise<T> {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (this.config.authToken) headers.Authorization = `Bearer ${this.config.authToken}`;
     const res = await fetch(`${this.config.apiUrl}${endpoint}`, {

@@ -129,20 +129,22 @@ async function main(): Promise<void> {
     }
     const tc = extractToolCall(reply);
     const wantTool = c.wantTool !== false;
-    console.log(`  reply (${reply.length} chars): ${JSON.stringify(reply.slice(0, 240))}${reply.length > 240 ? "…" : ""}`);
+    console.log(
+      `  reply (${reply.length} chars): ${JSON.stringify(reply.slice(0, 240))}${reply.length > 240 ? "…" : ""}`,
+    );
     if (wantTool) {
       if (tc) {
         pass++;
         console.log(`  PASS  well-formed tool_call -> name=${tc.name} args=${JSON.stringify(tc.arguments)}`);
       } else {
-        console.log(`  FAIL  expected a <tool_call> block, none parsed`);
+        console.log("  FAIL  expected a <tool_call> block, none parsed");
       }
     } else {
       if (!tc) {
         pass++;
-        console.log(`  PASS  no tool_call (plain answer as expected)`);
+        console.log("  PASS  no tool_call (plain answer as expected)");
       } else {
-        console.log(`  FAIL  unexpected tool_call in a plain-answer case`);
+        console.log("  FAIL  unexpected tool_call in a plain-answer case");
       }
     }
   }
