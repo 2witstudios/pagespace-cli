@@ -19,20 +19,33 @@ export interface Spec {
   criteria: Requirement[];
   /** Runnable pass/fail commands (exit 0 = pass). */
   gates: string[];
+  /** Leaf titles/ids this leaf depends on (must be done first). */
+  dependsOn: string[];
 }
 
 // Greedy "given" so commas inside the situation are kept; the trailing ", should …" ends it.
 const GIVEN_RE = /^\s*[-*]?\s*given\s+(.+),\s*should\s+(.+?)\s*$/i;
 const GATE_RE = /^\s*gate:\s*(.+?)\s*$/i;
+const DEPENDS_RE = /^\s*[-*]?\s*depends(?:[-_]on)?\s*:\s*(.+?)\s*$/i;
 
-/** Parse a spec page's text into acceptance criteria + gate commands. Pure. */
+/** Parse a spec page's text into acceptance criteria + gate commands + dependencies. Pure. */
 export function parseSpec(text: string): Spec {
   const criteria: Requirement[] = [];
   const gates: string[] = [];
+  const dependsOn: string[] = [];
   for (const line of text.split("\n")) {
     const gate = GATE_RE.exec(line);
     if (gate) {
       gates.push(gate[1].trim());
+      continue;
+    }
+    const dep = DEPENDS_RE.exec(line);
+    if (dep) {
+      for (const d of dep[1]
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean))
+        dependsOn.push(d);
       continue;
     }
     const m = GIVEN_RE.exec(line);
@@ -42,7 +55,13 @@ export function parseSpec(text: string): Spec {
       if (given && should) criteria.push({ given, should });
     }
   }
-  return { criteria, gates };
+  return { criteria, gates, dependsOn };
+}
+
+/** Which of `dependsOn` are NOT in the set of done leaf titles/ids. Pure. */
+export function unmetDeps(dependsOn: string[], done: Iterable<string>): string[] {
+  const doneSet = new Set(done);
+  return dependsOn.filter((d) => !doneSet.has(d));
 }
 
 /** True when the spec is gateable (has at least one runnable gate). Pure. */
@@ -50,11 +69,12 @@ export function hasGate(spec: Spec): boolean {
   return spec.gates.length > 0;
 }
 
-/** Render a spec block (criteria bullets + gate lines). Pure; round-trips with parseSpec. */
+/** Render a spec block (criteria bullets + gate lines + depends-on). Pure; round-trips with parseSpec. */
 export function formatSpec(spec: Spec): string {
   const lines: string[] = [];
   for (const c of spec.criteria) lines.push(`- Given ${c.given}, should ${c.should}`);
   for (const g of spec.gates) lines.push(`gate: ${g}`);
+  if (spec.dependsOn.length > 0) lines.push(`depends-on: ${spec.dependsOn.join(", ")}`);
   return lines.join("\n");
 }
 

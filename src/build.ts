@@ -17,7 +17,7 @@
 import type { PageSpaceApi, TaskRecord } from "./api.ts";
 import type { PageSpaceConfig } from "./config.ts";
 import { Type } from "typebox";
-import { type Spec, parseSpec } from "./spec.ts";
+import { type Spec, parseSpec, unmetDeps } from "./spec.ts";
 import { formatRequirements } from "./requirements.ts";
 import { type CompleteResult, formatCompleteResult, gatedCompleteWithReview } from "./complete.ts";
 
@@ -31,9 +31,9 @@ export function pickNextLeaf(tasks: TaskRecord[]): TaskRecord | null {
   return tasks.find((t) => !isLeafDone(t)) ?? null;
 }
 
-/** Read a leaf's spec from its backing page (Given/should criteria + gate commands). */
+/** Read a leaf's spec from its backing page (Given/should criteria + gate commands + deps). */
 export async function loadLeafSpec(api: PageSpaceApi, task: TaskRecord): Promise<Spec> {
-  if (!task.pageId) return { criteria: [], gates: [] };
+  if (!task.pageId) return { criteria: [], gates: [], dependsOn: [] };
   return parseSpec(await api.readContent(task.pageId));
 }
 
@@ -44,12 +44,15 @@ export interface BuildResult {
   spec?: Spec;
   /** Present when work/implement ran and the leaf was gate+review checked. */
   result?: CompleteResult;
+  /** Set when every remaining leaf is blocked by unmet dependencies. */
+  blocked?: { leaf: TaskRecord; unmet: string[] }[];
 }
 
 /**
- * Advance one leaf: pick the next unblocked leaf, load its spec, and — when `work` (or `implement`)
- * is provided — run the gate + mandatory review and complete it. The review rubric is the leaf's own
- * acceptance criteria.
+ * Advance one leaf: pick the next workable leaf (not done, and whose `depends-on` are all done),
+ * load its spec, and — when `work` (or `implement`) is provided — run the gate + mandatory review
+ * and complete it. The review rubric is the leaf's own acceptance criteria. Leaves whose deps are
+ * unmet are skipped; if every remaining leaf is dep-blocked, `blocked` lists them.
  */
 export async function buildNext(
   api: PageSpaceApi,
@@ -62,10 +65,33 @@ export async function buildNext(
     signal?: AbortSignal;
   },
 ): Promise<BuildResult> {
-  const leaf = pickNextLeaf(await api.listTasks(opts.listPageId));
-  if (!leaf) return { done: true };
+  const tasks = await api.listTasks(opts.listPageId);
+  const done = new Set<string>();
+  for (const t of tasks) {
+    if (isLeafDone(t)) {
+      done.add(t.title);
+      done.add(t.id);
+    }
+  }
+  const active = tasks.filter((t) => !isLeafDone(t));
+  if (active.length === 0) return { done: true };
 
-  const spec = await loadLeafSpec(api, leaf);
+  // Find the first active leaf whose dependencies are all satisfied.
+  const blocked: { leaf: TaskRecord; unmet: string[] }[] = [];
+  let leaf: TaskRecord | undefined;
+  let spec: Spec | undefined;
+  for (const candidate of active) {
+    const s = await loadLeafSpec(api, candidate);
+    const unmet = unmetDeps(s.dependsOn, done);
+    if (unmet.length === 0) {
+      leaf = candidate;
+      spec = s;
+      break;
+    }
+    blocked.push({ leaf: candidate, unmet });
+  }
+  if (!leaf || !spec) return { done: false, blocked };
+
   let work = opts.work;
   if (!work && opts.implement) work = await opts.implement(leaf, spec);
   if (!work) return { done: false, leaf, spec };
@@ -86,6 +112,12 @@ export async function buildNext(
 /** Render a build step for humans / logs. Pure. */
 export function formatBuildResult(b: BuildResult): string {
   if (b.done) return "No active leaf remaining — the list is complete.";
+  if (b.blocked && !b.leaf) {
+    return [
+      "All remaining leaves are blocked by unmet dependencies:",
+      ...b.blocked.map((x) => `  ${x.leaf.title} ⟂ needs: ${x.unmet.join(", ")}`),
+    ].join("\n");
+  }
   const head = `Next leaf: ${b.leaf?.title ?? "(untitled)"}`;
   const specLine = `  ${b.spec?.criteria.length ?? 0} criteria, gates: ${JSON.stringify(b.spec?.gates ?? [])}`;
   if (!b.result) return [head, specLine, "  (no work supplied — implement, then complete)"].join("\n");

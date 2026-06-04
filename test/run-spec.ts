@@ -40,6 +40,7 @@ async function main(): Promise<void> {
   const body = `# _spectest\n\nA throwaway leaf spec.\n\n${formatSpec({
     criteria: [{ given: "a spec page", should: "parse into criteria and gates" }],
     gates: ["npm run check"],
+    dependsOn: [],
   })}\n`;
   const created = await api.createPage({
     driveId: d.driveId,
