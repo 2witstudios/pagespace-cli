@@ -4,6 +4,7 @@
 // (buildPiLaunchArgs/resolveExtensionPath/checkConfig — kept in TS for unit tests).
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -98,19 +99,15 @@ function vendoredSkillFlags() {
   return flags;
 }
 
-if (process.argv[2] === "status" || process.argv.includes("--check")) {
-  statusDoctor();
-} else {
-  // Banner to stderr so it never pollutes stdout / --mode json. Suppressed in non-interactive (-p)
-  // and json/rpc modes to keep machine output clean.
-  const passthrough = process.argv.slice(2);
+// Launch pi with the extension + vendored skills preloaded, then the passthrough args. Reused by the
+// default path and by `resume` (which adds `--session <id>`).
+function launchPi(passthrough) {
   const quiet = passthrough.includes("-p") || passthrough.includes("--print") || passthrough.includes("--mode");
   if (!quiet) process.stderr.write("pagespace · PageSpace-native pi (dual-mount + PageSpace brain)\n");
   const userManagesSkills =
     passthrough.includes("--no-skills") || passthrough.includes("-ns") || passthrough.includes("--skill");
   const skillFlags = userManagesSkills ? [] : ["--no-skills", ...vendoredSkillFlags()];
-  const args = ["-e", extensionPath, ...skillFlags, ...passthrough];
-  const child = spawn("pi", args, { stdio: "inherit" });
+  const child = spawn("pi", ["-e", extensionPath, ...skillFlags, ...passthrough], { stdio: "inherit" });
   child.on("error", (err) => {
     console.error(
       `pagespace: failed to launch pi (${err.message}). Is pi installed?  npm i -g @earendil-works/pi-coding-agent`,
@@ -121,4 +118,140 @@ if (process.argv[2] === "status" || process.argv.includes("--check")) {
     if (signal) process.kill(process.pid, signal);
     else process.exit(code ?? 0);
   });
+}
+
+// --- Session sync read-side (mirrors src/session-sync.ts; plain JS so the bin needs no TS loader) ---
+const SESSIONS_FOLDER = "Sessions";
+const JSONL_BEGIN = "<!--PI_SESSION_JSONL-->";
+const JSONL_END = "<!--/PI_SESSION_JSONL-->";
+const encodeCwdDir = (cwd) => `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+function extractJsonl(content) {
+  const s = content.indexOf(JSONL_BEGIN);
+  const e = content.indexOf(JSONL_END);
+  if (s === -1 || e === -1 || e < s) return null;
+  const inner = content.slice(s + JSONL_BEGIN.length, e).split("\n");
+  while (inner.length && (inner[0].trim() === "" || /^```/.test(inner[0].trim()))) inner.shift();
+  while (inner.length && (inner.at(-1).trim() === "" || /^```$/.test(inner.at(-1).trim()))) inner.pop();
+  const body = inner.join("\n").trim();
+  return body || null;
+}
+function parseHeader(jsonl) {
+  const first = jsonl.split("\n").find((l) => l.trim());
+  try {
+    const o = JSON.parse(first);
+    if (o?.type === "session" && typeof o.id === "string") return o;
+  } catch {}
+  return null;
+}
+
+function apiCfg() {
+  const base = (process.env.PAGESPACE_API_URL || "https://pagespace.ai").replace(/\/$/, "");
+  const token = process.env.PAGESPACE_AUTH_TOKEN;
+  const drive = process.env.PAGESPACE_DRIVE;
+  const agent = process.env.PAGESPACE_MODEL_PAGE;
+  const missing = [];
+  if (!token) missing.push("PAGESPACE_AUTH_TOKEN");
+  if (!drive) missing.push("PAGESPACE_DRIVE");
+  if (!agent) missing.push("PAGESPACE_MODEL_PAGE");
+  if (missing.length) {
+    console.error(`pagespace: session commands need ${missing.join(", ")} (set them in .env.local).`);
+    process.exit(1);
+  }
+  return { base, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, drive, agent };
+}
+async function getJson(url, headers) {
+  const r = await fetch(url, { headers });
+  if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+  return r.json();
+}
+function findNode(nodes, id) {
+  for (const n of nodes ?? []) {
+    if (n.id === id) return n;
+    const hit = findNode(n.children, id);
+    if (hit) return hit;
+  }
+  return null;
+}
+// Resolve the agent's `Sessions` folder children → [{pageId, shortId, title}]. Returns [] if none.
+async function remoteSessions(cfg) {
+  const drives = await getJson(`${cfg.base}/api/drives`, cfg.headers);
+  const list = Array.isArray(drives) ? drives : (drives?.drives ?? []);
+  const drive = list.find((d) => d.slug === cfg.drive);
+  if (!drive) throw new Error(`no drive with slug "${cfg.drive}"`);
+  const tree = await getJson(`${cfg.base}/api/drives/${drive.id}/pages`, cfg.headers);
+  const agent = findNode(tree, cfg.agent);
+  const folder = (agent?.children ?? []).find((p) => p.title === SESSIONS_FOLDER && p.type === "FOLDER");
+  const docs = (folder?.children ?? []).filter((p) => p.type === "DOCUMENT");
+  return docs.map((p) => ({ pageId: p.id, shortId: p.title.split(" ")[0], title: p.title }));
+}
+async function readPage(cfg, pageId) {
+  const r = await fetch(`${cfg.base}/api/mcp/documents`, {
+    method: "POST",
+    headers: cfg.headers,
+    body: JSON.stringify({ operation: "read", pageId }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status} reading page`);
+  return (await r.json())?.content ?? "";
+}
+
+async function sessionsCommand() {
+  const cfg = apiCfg();
+  try {
+    const sessions = await remoteSessions(cfg);
+    if (!sessions.length) {
+      console.log("No synced sessions yet. Run a `pagespace` session and they appear under the agent.");
+      return;
+    }
+    console.log(`Synced sessions (resume with: pagespace resume <id>):\n`);
+    for (const s of sessions) console.log(`  ${s.title}`);
+  } catch (err) {
+    console.error(`pagespace: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+async function resumeCommand(idPrefix, rest) {
+  if (!idPrefix) {
+    console.error("usage: pagespace resume <session-id>   (list ids with: pagespace sessions)");
+    process.exit(1);
+  }
+  const cfg = apiCfg();
+  try {
+    const sessions = await remoteSessions(cfg);
+    const match = sessions.find((s) => s.shortId.startsWith(idPrefix) || idPrefix.startsWith(s.shortId));
+    if (!match) {
+      console.error(`pagespace: no synced session matching "${idPrefix}". Try: pagespace sessions`);
+      process.exit(1);
+    }
+    const jsonl = extractJsonl(await readPage(cfg, match.pageId));
+    const header = jsonl && parseHeader(jsonl);
+    if (!jsonl || !header) {
+      console.error("pagespace: that session page has no embedded session data to resume.");
+      process.exit(1);
+    }
+    const cwd = header.cwd || process.cwd();
+    const dir = process.env.PI_CODING_AGENT_SESSION_DIR
+      ? process.env.PI_CODING_AGENT_SESSION_DIR
+      : path.join(os.homedir(), ".pi", "agent", "sessions", encodeCwdDir(cwd));
+    fs.mkdirSync(dir, { recursive: true });
+    const fileName = `${(header.timestamp || "").replace(/[:.]/g, "-")}_${header.id}.jsonl`;
+    const dest = path.join(dir, fileName);
+    fs.writeFileSync(dest, jsonl.endsWith("\n") ? jsonl : `${jsonl}\n`);
+    process.stderr.write(`pagespace · resuming session ${header.id.slice(0, 8)} (${match.title})\n`);
+    launchPi(["--session", header.id, ...rest]);
+  } catch (err) {
+    console.error(`pagespace: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+const sub = process.argv[2];
+if (sub === "status" || process.argv.includes("--check")) {
+  statusDoctor();
+} else if (sub === "sessions") {
+  sessionsCommand();
+} else if (sub === "resume") {
+  resumeCommand(process.argv[3], process.argv.slice(4));
+} else {
+  launchPi(process.argv.slice(2));
 }

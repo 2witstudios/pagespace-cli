@@ -109,6 +109,21 @@ bleed in and there are no skill-name collisions. Plain `pi` (after `pi install -
 non-isolated dev path — it also loads whatever skills you have user-global. The pristine upstream
 originals live in `ai/skills/` (the vendor source; not pi-loaded).
 
+### Cross-machine resume
+
+Sessions sync through PageSpace so you can **start a conversation on one machine and finish it on
+another**. As you work, the active pi session (its JSONL) is mirrored to a page under the Companion
+Agent (`Sessions/` folder). On another machine:
+
+```bash
+pagespace sessions
+pagespace resume <id>
+```
+
+`resume` pulls the session back into pi's local store and continues it natively via `pi --session`
+(full fidelity — tool calls and all). Needs `PAGESPACE_MODEL_PAGE` set (the agent the sessions hang
+under). Hand-off is sequential (stop on A, resume on B); it's last-writer-wins, not live co-editing.
+
 ## Architecture
 
 PageSpace is the substrate — pi's filesystem, model/brain, memory, and task list — wired in
@@ -121,10 +136,10 @@ extension (`extensions/pagespace.ts`) composes it all.
   `src/api.ts` + a path↔page resolver `src/resolve.ts`); everything else is the local repo; `bash`
   stays local. `grep` under the mount uses the drive's server-side `regex_search`.
 - **PageSpace brain.** pi's LLM calls go to PageSpace `POST /api/v1/chat/completions`
-  (model `ps-agent://<pageId>`). The route ignores client `tools`, so a **prompted-tool shim**
-  (`src/tool-call-parser.ts` + `src/provider.ts`) injects pi's tool manifest, parses the model's
-  `<tool_call>`/bare-JSON back into pi tool calls, and aborts the stream — the whole tool loop stays
-  in pi. Tuned to be reliable on the managed `glm-5` tier.
+  (model `ps-agent://<pageId>`). The route now supports client `tools`; the companion currently
+  keeps a **prompted-tool shim** (`src/tool-call-parser.ts` + `src/provider.ts`) for deterministic,
+  model-agnostic behavior while keeping the tool loop in pi. It injects pi's tool manifest, parses
+  `<tool_call>`/bare-JSON back into pi tool calls, and aborts the stream after the first call.
 
 ### Deterministic memory engine (Epic 2)
 - **Context auto-load** (`before_agent_start`): injects the drive's `Vision` + `_index` + Brain index
