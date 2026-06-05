@@ -2,11 +2,11 @@
  * PageSpace model brain for pi — a custom `streamSimple` over `POST /api/v1/chat/completions`
  * (model `ps-agent://<pageId>`, OpenAI SSE). The whole agentic tool loop stays in pi:
  *
- *   1. The v1 route ignores the request's `tools` (verified) — it only runs the *agent page's*
- *      server-side tools. So pi can't use native function-calling here. Instead we run a
- *      **prompted-tool protocol**: the shim injects pi's real tool manifest + a strict output
- *      format into the system prompt; the model replies with a `<tool_call>{json}</tool_call>`
- *      text block; the shim parses it back into a pi `toolCall` so pi executes it locally.
+ *   1. The v1 route now accepts client `tools`. The companion currently keeps a
+ *      **prompted-tool protocol** for deterministic, model-agnostic behavior: the shim injects
+ *      pi's real tool manifest + a strict output format into the system prompt; the model replies
+ *      with a `<tool_call>{json}</tool_call>` text block; the shim parses it back into a pi
+ *      `toolCall` so pi executes it locally.
  *   2. The route always injects a `finish` tool into the model's native manifest, which makes a
  *      capable model think `finish` is its only tool — so the protocol carries an explicit
  *      "ignore your native manifest" override (validated against claude-sonnet-4.6 via openrouter;

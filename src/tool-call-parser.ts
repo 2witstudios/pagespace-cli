@@ -1,11 +1,11 @@
 /**
  * Pure, streaming parser for the prompted-tool protocol (see src/provider.ts).
  *
- * The PageSpace v1 completions route ignores client `tools`, so pi's brain emits tool calls as
- * TEXT — ideally a `<tool_call>{json}</tool_call>` block, but weaker models (glm-5) reliably emit
- * the right JSON while dropping the wrapper and adding a prose preamble. This parser accepts both
- * forms, streams plain text through, and stops at the FIRST tool call. It is deliberately free of
- * any network or pi-stream coupling so it can be unit-tested exhaustively.
+ * The companion currently emits tool calls as TEXT via a prompted-tool protocol — ideally a
+ * `<tool_call>{json}</tool_call>` block, but weaker models (glm-5) reliably emit the right JSON
+ * while dropping the wrapper and adding a prose preamble. This parser accepts both forms, streams
+ * plain text through, and stops at the FIRST tool call. It is deliberately free of any network or
+ * pi-stream coupling so it can be unit-tested exhaustively.
  *
  * Guard against false positives: a bare `{…}` is treated as a tool call ONLY if it starts with
  * `"name"`/`"arguments"` AND its parsed `name` matches a known tool; otherwise it streams as text.
