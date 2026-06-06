@@ -7,6 +7,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  encodeCwdDir,
+  extractJsonl,
+  parseHeader,
+  resolveSessionRef,
+  SESSIONS_FOLDER,
+  sessionIdFromTitle,
+} from "./session-read.mjs";
 
 const extensionPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "extensions", "pagespace.ts");
 
@@ -120,29 +128,6 @@ function launchPi(passthrough) {
   });
 }
 
-// --- Session sync read-side (mirrors src/session-sync.ts; plain JS so the bin needs no TS loader) ---
-const SESSIONS_FOLDER = "Sessions";
-const JSONL_BEGIN = "<!--PI_SESSION_JSONL-->";
-const JSONL_END = "<!--/PI_SESSION_JSONL-->";
-const encodeCwdDir = (cwd) => `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
-function extractJsonl(content) {
-  const s = content.indexOf(JSONL_BEGIN);
-  const e = content.indexOf(JSONL_END);
-  if (s === -1 || e === -1 || e < s) return null;
-  const inner = content.slice(s + JSONL_BEGIN.length, e).split("\n");
-  while (inner.length && (inner[0].trim() === "" || /^```/.test(inner[0].trim()))) inner.shift();
-  while (inner.length && (inner.at(-1).trim() === "" || /^```$/.test(inner.at(-1).trim()))) inner.pop();
-  const body = inner.join("\n").trim();
-  return body || null;
-}
-function parseHeader(jsonl) {
-  const first = jsonl.split("\n").find((l) => l.trim());
-  try {
-    const o = JSON.parse(first);
-    if (o?.type === "session" && typeof o.id === "string") return o;
-  } catch {}
-  return null;
-}
 
 function apiCfg() {
   const base = (process.env.PAGESPACE_API_URL || "https://pagespace.ai").replace(/\/$/, "");
@@ -183,14 +168,7 @@ async function remoteSessions(cfg) {
   const agent = findNode(tree, cfg.agent);
   const folder = (agent?.children ?? []).find((p) => p.title === SESSIONS_FOLDER && p.type === "FOLDER");
   const docs = (folder?.children ?? []).filter((p) => p.type === "DOCUMENT");
-  return docs.map((p) => ({ pageId: p.id, id: p.title.split(" · ")[0], title: p.title }));
-}
-// Exact full-id match wins; else a unique prefix. Multiple prefix hits → ambiguous (candidates).
-function resolveSessionRef(sessions, ref) {
-  const exact = sessions.find((s) => s.id === ref);
-  if (exact) return { match: exact, candidates: [exact] };
-  const candidates = sessions.filter((s) => s.id.startsWith(ref));
-  return { match: candidates.length === 1 ? candidates[0] : undefined, candidates };
+  return docs.map((p) => ({ pageId: p.id, id: sessionIdFromTitle(p.title), title: p.title }));
 }
 async function readPage(cfg, pageId) {
   const r = await fetch(`${cfg.base}/api/mcp/documents`, {
