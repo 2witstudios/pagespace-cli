@@ -169,7 +169,12 @@ export function renderTranscript(jsonl: string): string {
   return out.length ? out.join("\n\n") : "_(no turns yet)_";
 }
 
-/** Render the full per-session page: header + transcript + the exact JSONL between sentinels. Pure. */
+/**
+ * Render the full per-session page: header + transcript snapshot, then the exact JSONL as the FINAL,
+ * open-ended region (a `<!--PI_SESSION_JSONL-->` sentinel + an unclosed ```jsonl fence running to
+ * end-of-page). Keeping the JSONL last lets incremental sync append new lines at end-of-page without
+ * disturbing structure (see the Incremental session sync epic). Pure.
+ */
 export function renderSessionPage(jsonl: string, opts: { updatedAt: string; machine?: string }): string {
   const meta = parseSessionMeta(jsonl);
   const header = parseSessionHeader(jsonl);
@@ -195,28 +200,31 @@ export function renderSessionPage(jsonl: string, opts: { updatedAt: string; mach
     JSONL_BEGIN,
     "```jsonl",
     jsonl.trimEnd(),
-    "```",
-    JSONL_END,
-    "",
   );
-  return lines.join("\n");
+  // Final newline only — no closing fence / JSONL_END, so the JSONL stays the open last region.
+  return `${lines.join("\n")}\n`;
 }
 
-/** Pull the exact JSONL back out of a rendered page (between sentinels, fence lines stripped). Pure. */
+/**
+ * Pull the exact JSONL back out of a rendered page. Reads from `JSONL_BEGIN` to end-of-page (the
+ * open-ended current format), or to `JSONL_END` when present (the legacy closed format), stripping the
+ * surrounding ```jsonl fence lines. A JSONL line is `{…}` and never a bare ``` fence, so the strip is
+ * safe. Pure.
+ */
 export function extractJsonl(pageContent: string): string | null {
   const start = pageContent.indexOf(JSONL_BEGIN);
-  const end = pageContent.indexOf(JSONL_END);
-  if (start === -1 || end === -1 || end < start) return null;
-  let body = pageContent.slice(start + JSONL_BEGIN.length, end);
-  const inner = body.split("\n");
-  // Drop the leading/trailing blank + fence lines the renderer adds (a JSONL line is `{...}`, never ```).
+  if (start === -1) return null;
+  let region = pageContent.slice(start + JSONL_BEGIN.length);
+  const legacyEnd = region.indexOf(JSONL_END);
+  if (legacyEnd !== -1) region = region.slice(0, legacyEnd);
+  const inner = region.split("\n");
   while (inner.length && (inner[0].trim() === "" || /^```/.test(inner[0].trim()))) inner.shift();
   while (
     inner.length &&
     (inner[inner.length - 1].trim() === "" || /^```$/.test(inner[inner.length - 1].trim()))
   )
     inner.pop();
-  body = inner.join("\n");
+  const body = inner.join("\n");
   return body.trim() ? body : null;
 }
 
