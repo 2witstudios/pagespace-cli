@@ -5,7 +5,7 @@ A PageSpace-native `pi` companion (a [pi](https://pi.dev) package).
 - **Dual-mount files:** pi's `read`/`write`/`edit`/`ls`/`find`/`grep` operate on PageSpace pages
   under a `pagespace/<drive>/…` mount; everything else is the local repo; `bash` stays local.
 - **PageSpace as the model brain:** pi's LLM calls go to PageSpace `POST /api/v1/chat/completions`
-  (model `ps-agent://<pageId>`); a prompted-tool shim keeps the tool loop entirely in pi.
+  (model `ps-agent://<pageId>`) using native function-calling, so pi runs its own tools locally.
 
 ## Quickstart
 
@@ -139,10 +139,10 @@ extension (`extensions/pagespace.ts`) composes it all.
   `src/api.ts` + a path↔page resolver `src/resolve.ts`); everything else is the local repo; `bash`
   stays local. `grep` under the mount uses the drive's server-side `regex_search`.
 - **PageSpace brain.** pi's LLM calls go to PageSpace `POST /api/v1/chat/completions`
-  (model `ps-agent://<pageId>`). The route now supports client `tools`; the companion currently
-  keeps a **prompted-tool shim** (`src/tool-call-parser.ts` + `src/provider.ts`) for deterministic,
-  model-agnostic behavior while keeping the tool loop in pi. It injects pi's tool manifest, parses
-  `<tool_call>`/bare-JSON back into pi tool calls, and aborts the stream after the first call.
+  (model `ps-agent://<pageId>`) using **native function-calling** (`src/provider.ts`): the request
+  sends pi's tools + `disable_server_tools` (the route's client-only mode), the model returns native
+  `tool_calls`, and pi runs each tool locally — the whole tool loop stays in pi. (This replaced an
+  earlier prompted-tool text shim once the route accepted client `tools`, PageSpace #1559.)
 
 ### Deterministic memory engine (Epic 2)
 - **Context auto-load** (`before_agent_start`): injects the drive's `Vision` + `_index` + Brain index

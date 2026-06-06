@@ -13,7 +13,7 @@
  *   3. The route stops the step at the tool call (`finish_reason: "tool_calls"`) — no text-protocol
  *      parsing, no hallucinated tail, no abort hack. Plain answers stream as `delta.content`.
  *
- * (Superseded the prompted-tool TEXT shim once the route accepted client tools; see `tool-call-parser.ts`.)
+ * (Superseded the prompted-tool TEXT shim once the route accepted client `tools` — PageSpace #1559.)
  * Dependency-free: raw fetch + manual SSE parse, types from `@earendil-works/pi-ai`.
  */
 import type {

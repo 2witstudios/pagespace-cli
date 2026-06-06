@@ -12,7 +12,7 @@
 import { Type } from "typebox";
 import type { PageSpaceConfig } from "./config.ts";
 import { type BrainMessage, completeViaBrain } from "./brain.ts";
-import { tryExtractFirstJsonObject } from "./tool-call-parser.ts";
+import { tryExtractFirstJsonObject } from "./json-extract.ts";
 
 export interface FixProposal {
   diagnosis: string;
