@@ -217,14 +217,12 @@ export function extractJsonl(pageContent: string): string | null {
   let region = pageContent.slice(start + JSONL_BEGIN.length);
   const legacyEnd = region.indexOf(JSONL_END);
   if (legacyEnd !== -1) region = region.slice(0, legacyEnd);
-  const inner = region.split("\n");
-  while (inner.length && (inner[0].trim() === "" || /^```/.test(inner[0].trim()))) inner.shift();
-  while (
-    inner.length &&
-    (inner[inner.length - 1].trim() === "" || /^```$/.test(inner[inner.length - 1].trim()))
-  )
-    inner.pop();
-  const body = inner.join("\n");
+  // Keep only JSONL lines: drop blanks and the ```jsonl fence lines. A JSONL line is `{…}`, never a
+  // bare ``` — so this is safe AND tolerant of stray blank lines an incremental append may introduce.
+  const body = region
+    .split("\n")
+    .filter((l) => l.trim() && !/^```/.test(l.trim()))
+    .join("\n");
   return body.trim() ? body : null;
 }
 
@@ -266,6 +264,40 @@ export function reconcileSyncedLines(localJsonl: string, remoteJsonl: string | n
     if (remote[i] !== local[i]) return -1;
   }
   return remote.length;
+}
+
+/** The decided sync action — pure output of `planSync`, executed by `pushSession`. */
+export type SyncAction =
+  | { kind: "create"; offset: number }
+  | { kind: "full"; offset: number }
+  | { kind: "append"; content: string; offset: number }
+  | { kind: "noop"; offset: number };
+
+/**
+ * Decide how to sync a session to its page. Pure — `pushSession` does the I/O. `offset` is the
+ * in-memory synced line count (null on the first push of a process); `remote` is the remote JSONL,
+ * needed only to seed an unknown offset. Append-only by default; falls back to a full re-render when
+ * forced (`full`), when the offset can't be reconciled (divergence/fork), or for a missing page.
+ */
+export function planSync(args: {
+  exists: boolean;
+  local: string;
+  offset: number | null;
+  remote?: string | null;
+  full?: boolean;
+}): SyncAction {
+  const total = jsonlLines(args.local).length;
+  if (!args.exists) return { kind: "create", offset: total };
+  if (args.full) return { kind: "full", offset: total };
+  let offset = args.offset;
+  if (offset === null) {
+    offset = reconcileSyncedLines(args.local, args.remote ?? null);
+    if (offset === -1) return { kind: "full", offset: total };
+  }
+  const delta = computeSyncDelta(args.local, offset);
+  if (delta.diverged) return { kind: "full", offset: total };
+  if (!delta.append) return { kind: "noop", offset: total };
+  return { kind: "append", content: delta.append, offset: delta.total };
 }
 
 /** pi's session directory for a cwd (honoring the PI_CODING_AGENT_SESSION_DIR override). Pure-ish (reads env). */
@@ -323,10 +355,15 @@ export interface PushResult {
   created: boolean;
 }
 
+/** Per-session synced line count, in-process. Seeded from the remote page on the first push. */
+const syncedLines = new Map<string, number>();
+
 /**
- * Mirror the active session's local JSONL to a page under the agent. Reads the local file by session
- * id, upserts the per-session DOCUMENT (matched by short-id title prefix). No-op (null) if the local
- * file isn't found yet. Best-effort: callers wrap in try/catch so a sync failure never breaks a turn.
+ * Mirror the active session's local JSONL to a page under the agent (matched by full session id).
+ * Append-only by default: only the lines added since the last sync are inserted at end-of-page (cheap
+ * for long sessions); a full re-render runs when the page is new, when `opts.full` is set (refresh the
+ * readable transcript — the cadence leaf), or when the offset can't be reconciled (divergence/fork).
+ * No-op (null) when the local file isn't found. Best-effort: callers wrap in try/catch.
  */
 export async function pushSession(
   api: PageSpaceApi,
@@ -334,7 +371,7 @@ export async function pushSession(
   driveSlug: string,
   agentPageId: string,
   sessionId: string,
-  opts: { cwd?: string; file?: string; updatedAt?: string; machine?: string } = {},
+  opts: { cwd?: string; file?: string; updatedAt?: string; machine?: string; full?: boolean } = {},
 ): Promise<PushResult | null> {
   // Prefer the exact path pi reports (ctx.sessionManager.getSessionFile()); else locate by id.
   const cwd = opts.cwd ?? process.cwd();
@@ -344,10 +381,11 @@ export async function pushSession(
   const jsonl = fs.readFileSync(file, "utf8");
   if (!jsonl.trim()) return null;
   const meta = parseSessionMeta(jsonl);
-  const content = renderSessionPage(jsonl, {
-    updatedAt: opts.updatedAt ?? new Date().toISOString().slice(0, 16).replace("T", " "),
-    machine: opts.machine ?? os.hostname(),
-  });
+  const render = () =>
+    renderSessionPage(jsonl, {
+      updatedAt: opts.updatedAt ?? new Date().toISOString().slice(0, 16).replace("T", " "),
+      machine: opts.machine ?? os.hostname(),
+    });
 
   const driveId = await driveIdFor(resolver, driveSlug);
   const folderId = await ensureSessionsFolder(api, resolver, driveId, agentPageId);
@@ -355,20 +393,44 @@ export async function pushSession(
   const existing = (await resolver.children(driveId, folderId)).find(
     (p) => sessionIdFromTitle(p.title) === sessionId,
   );
-  if (existing) {
-    await api.patchPage(existing.id, { content });
-    return { pageId: existing.id, title: existing.title, created: false };
+
+  const offset = existing ? (syncedLines.get(sessionId) ?? null) : null;
+  // Seed an unknown offset from the remote page once (resume / cross-machine), reading it just this once.
+  const remote =
+    existing && offset === null
+      ? await api
+          .readContent(existing.id)
+          .then(extractJsonl)
+          .catch(() => null)
+      : null;
+  const plan = planSync({ exists: !!existing, local: jsonl, offset, remote, full: opts.full });
+
+  if (!existing) {
+    const created = await api.createPage({
+      driveId,
+      title: meta.title,
+      type: "DOCUMENT",
+      parentId: folderId,
+      content: render(),
+      contentMode: "markdown",
+    });
+    resolver.invalidate(driveId);
+    syncedLines.set(sessionId, plan.offset);
+    return { pageId: created.id, title: meta.title, created: true };
   }
-  const created = await api.createPage({
-    driveId,
-    title: meta.title,
-    type: "DOCUMENT",
-    parentId: folderId,
-    content,
-    contentMode: "markdown",
-  });
-  resolver.invalidate(driveId);
-  return { pageId: created.id, title: meta.title, created: true };
+
+  if (plan.kind === "append") {
+    await api.documents({
+      operation: "insert",
+      pageId: existing.id,
+      startLine: 1_000_000,
+      content: `\n${plan.content}`,
+    });
+  } else if (plan.kind !== "noop") {
+    await api.patchPage(existing.id, { content: render() }); // "full" (and the unreachable "create")
+  }
+  syncedLines.set(sessionId, plan.offset);
+  return { pageId: existing.id, title: existing.title, created: false };
 }
 
 export interface RemoteSession {
