@@ -1,0 +1,91 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { convertTools, toOpenAIMessages } from "../../src/provider.ts";
+
+// pi Message/Tool shapes are constructed loosely here; the helpers only read role/content/parameters.
+const msgs = (arr: unknown[]) => toOpenAIMessages(arr as Parameters<typeof toOpenAIMessages>[0]);
+
+test("toOpenAIMessages: user text → role:user", () => {
+  assert.deepEqual(msgs([{ role: "user", content: [{ type: "text", text: "hello" }] }]), [
+    { role: "user", content: "hello" },
+  ]);
+});
+
+test("toOpenAIMessages: assistant text only → role:assistant content", () => {
+  assert.deepEqual(msgs([{ role: "assistant", content: [{ type: "text", text: "hi there" }] }]), [
+    { role: "assistant", content: "hi there" },
+  ]);
+});
+
+test("toOpenAIMessages: assistant tool call → tool_calls with stringified args", () => {
+  const out = msgs([
+    {
+      role: "assistant",
+      content: [{ type: "toolCall", id: "c1", name: "read", arguments: { path: "x.ts" } }],
+    },
+  ]);
+  assert.equal(out[0].role, "assistant");
+  assert.deepEqual(out[0].tool_calls, [
+    { id: "c1", type: "function", function: { name: "read", arguments: '{"path":"x.ts"}' } },
+  ]);
+});
+
+test("toOpenAIMessages: assistant text + parallel tool calls", () => {
+  const out = msgs([
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "doing two things" },
+        { type: "toolCall", id: "c1", name: "read", arguments: { path: "a" } },
+        { type: "toolCall", id: "c2", name: "bash", arguments: { command: "ls" } },
+      ],
+    },
+  ]);
+  assert.equal(out[0].content, "doing two things");
+  assert.equal(out[0].tool_calls?.length, 2);
+  assert.equal(out[0].tool_calls?.[1].function.name, "bash");
+});
+
+test("toOpenAIMessages: toolResult → role:tool with tool_call_id", () => {
+  assert.deepEqual(
+    msgs([
+      {
+        role: "toolResult",
+        toolCallId: "c1",
+        toolName: "read",
+        content: [{ type: "text", text: "file body" }],
+        isError: false,
+      },
+    ]),
+    [{ role: "tool", tool_call_id: "c1", content: "file body" }],
+  );
+});
+
+test("toOpenAIMessages: error tool result still role:tool", () => {
+  const out = msgs([
+    {
+      role: "toolResult",
+      toolCallId: "c2",
+      toolName: "bash",
+      content: [{ type: "text", text: "boom" }],
+      isError: true,
+    },
+  ]);
+  assert.equal(out[0].role, "tool");
+  assert.equal(out[0].tool_call_id, "c2");
+  assert.match(out[0].content ?? "", /boom/);
+});
+
+test("convertTools: maps to OpenAI function tool shape", () => {
+  const params = { type: "object", properties: { path: { type: "string" } } };
+  const out = convertTools([{ name: "read", description: "read a file", parameters: params }] as Parameters<
+    typeof convertTools
+  >[0]);
+  assert.deepEqual(out, [
+    { type: "function", function: { name: "read", description: "read a file", parameters: params } },
+  ]);
+});
+
+test("convertTools: empty → empty", () => {
+  assert.deepEqual(convertTools([]), []);
+});
