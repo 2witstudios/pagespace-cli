@@ -191,15 +191,21 @@ export default function (pi: ExtensionAPI) {
     // session started here can be pulled + continued elsewhere (`pagespace resume <id>` → `pi --session`).
     // Keyed by the stable session id; best-effort, never breaks the session. Needs a configured agent page.
     const agentPageId = config.modelPageId;
-    const syncSession = async (ctx: {
-      sessionManager: { getSessionId(): string; getCwd(): string; getSessionFile(): string | undefined };
-    }): Promise<void> => {
+    // Append-only on ordinary turns (cheap); `full` re-renders the readable transcript/header on
+    // compaction + shutdown so the human-readable snapshot is current (the JSONL stays live either way).
+    const syncSession = async (
+      ctx: {
+        sessionManager: { getSessionId(): string; getCwd(): string; getSessionFile(): string | undefined };
+      },
+      full = false,
+    ): Promise<void> => {
       if (!agentPageId) return;
       try {
         const sm = ctx.sessionManager;
         await pushSession(api, resolver, driveSlug, agentPageId, sm.getSessionId(), {
           cwd: sm.getCwd(),
           file: sm.getSessionFile(),
+          full,
         });
       } catch {
         // sync must never break the session
@@ -244,11 +250,11 @@ export default function (pi: ExtensionAPI) {
       } catch {
         // persistence must never break the session
       }
-      await syncSession(ctx);
+      await syncSession(ctx, true); // compaction changed the transcript shape — full re-render
     });
 
     pi.on("session_shutdown", async (_event, ctx) => {
-      await syncSession(ctx);
+      await syncSession(ctx, true); // final snapshot — full re-render
     });
   }
 }
