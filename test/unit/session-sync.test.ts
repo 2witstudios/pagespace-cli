@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   encodeCwdDir,
   extractJsonl,
+  JSONL_BEGIN,
+  JSONL_END,
   parseSessionHeader,
   parseSessionMeta,
   type RemoteSession,
@@ -111,4 +113,17 @@ test("extractJsonl survives a backtick fence appearing inside a JSON string", ()
 
 test("extractJsonl returns null when no embedded session is present", () => {
   assert.equal(extractJsonl("# just a normal page\n\nno session here"), null);
+});
+
+test("renderSessionPage: JSONL is the FINAL, open-ended region (append-friendly; no JSONL_END)", () => {
+  const page = renderSessionPage(SAMPLE, { updatedAt: "2026-06-06 10:00" });
+  // The JSONL is the last content so insert-at-end lands inside it — no closing sentinel after it.
+  assert.ok(!page.includes(JSONL_END), "new format must not emit a closing JSONL_END sentinel");
+  assert.ok(page.trimEnd().endsWith(SAMPLE.trimEnd()), "page must end with the JSONL");
+  assert.equal(extractJsonl(page), SAMPLE.trimEnd(), "round-trips on the open-ended format");
+});
+
+test("extractJsonl: still reads the LEGACY closing-fence + JSONL_END format (back-compat)", () => {
+  const legacy = `# Session\n\n## Session data\n\n${JSONL_BEGIN}\n\`\`\`jsonl\n${SAMPLE.trimEnd()}\n\`\`\`\n${JSONL_END}\n`;
+  assert.equal(extractJsonl(legacy), SAMPLE.trimEnd());
 });

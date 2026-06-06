@@ -16,12 +16,17 @@ export const JSONL_END = "<!--/PI_SESSION_JSONL-->";
 /** Reproduce pi's cwd → session-dir name: `--<cwd without leading slash, / \\ : → ->--`. */
 export const encodeCwdDir = (cwd) => `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
 
-/** Pull the exact JSONL back out of a rendered page (between sentinels, fence lines stripped). */
+/**
+ * Pull the exact JSONL back out of a rendered page. Reads from JSONL_BEGIN to end-of-page (current
+ * open-ended format) or to JSONL_END when present (legacy), stripping the ```jsonl fence lines.
+ */
 export function extractJsonl(content) {
   const s = content.indexOf(JSONL_BEGIN);
-  const e = content.indexOf(JSONL_END);
-  if (s === -1 || e === -1 || e < s) return null;
-  const inner = content.slice(s + JSONL_BEGIN.length, e).split("\n");
+  if (s === -1) return null;
+  let region = content.slice(s + JSONL_BEGIN.length);
+  const legacyEnd = region.indexOf(JSONL_END);
+  if (legacyEnd !== -1) region = region.slice(0, legacyEnd);
+  const inner = region.split("\n");
   while (inner.length && (inner[0].trim() === "" || /^```/.test(inner[0].trim()))) inner.shift();
   while (inner.length && (inner.at(-1).trim() === "" || /^```$/.test(inner.at(-1).trim()))) inner.pop();
   const body = inner.join("\n").trim();
