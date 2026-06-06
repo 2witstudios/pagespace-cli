@@ -62,11 +62,6 @@ export interface OpenAITool {
  * Convert pi's message history into OpenAI-native chat messages for the v1 client-tools mode:
  * assistant turns carry `tool_calls` (arguments stringified), tool results become `role:"tool"`
  * messages keyed by `tool_call_id` (errors prefixed so the model can tell a failed call). Pure.
- *
- * STAGED — not yet wired into `streamSimple`: the native function-calling cut-over (the rewrite that
- * used this) was reverted in PR #32 because PageSpace #1559 (v1 client-tools mode) is merged but not
- * deployed to pagespace.ai. Re-wire once #1559 is live (revert the revert). Kept here, tested, to
- * avoid redoing the work.
  */
 export function toOpenAIMessages(messages: Message[]): OpenAIMessage[] {
   const out: OpenAIMessage[] = [];
