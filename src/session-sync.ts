@@ -228,6 +228,46 @@ export function extractJsonl(pageContent: string): string | null {
   return body.trim() ? body : null;
 }
 
+/** Non-empty JSONL lines (drops blank lines). Pure. */
+export function jsonlLines(jsonl: string): string[] {
+  return jsonl.split("\n").filter((l) => l.trim().length > 0);
+}
+
+export interface SyncDelta {
+  /** Newline-joined lines to append (empty when nothing is new). */
+  append: string;
+  /** Total line count after this sync — the new synced offset. */
+  total: number;
+  /** True when `syncedLines` exceeds the local length (truncation/fork) → caller should full-render. */
+  diverged: boolean;
+}
+
+/**
+ * Given the local JSONL and how many lines were last synced, compute the tail to append. Append-only:
+ * returns just `lines[syncedLines..]`. Pure.
+ */
+export function computeSyncDelta(localJsonl: string, syncedLines: number): SyncDelta {
+  const lines = jsonlLines(localJsonl);
+  if (syncedLines > lines.length) return { append: "", total: lines.length, diverged: true };
+  return { append: lines.slice(syncedLines).join("\n"), total: lines.length, diverged: false };
+}
+
+/**
+ * Reconcile the synced offset from the remote page's JSONL: how many leading lines of the local JSONL
+ * are already present remotely (an append-only prefix). Returns -1 when the remote is NOT a prefix of
+ * the local (mismatch, or remote ahead) so the caller full-renders instead of appending. Pure.
+ */
+export function reconcileSyncedLines(localJsonl: string, remoteJsonl: string | null): number {
+  if (!remoteJsonl) return 0;
+  const local = jsonlLines(localJsonl);
+  const remote = jsonlLines(remoteJsonl);
+  if (remote.length > local.length) return -1;
+  for (let i = 0; i < remote.length; i++) {
+    if (remote[i] !== local[i]) return -1;
+  }
+  return remote.length;
+}
+
 /** pi's session directory for a cwd (honoring the PI_CODING_AGENT_SESSION_DIR override). Pure-ish (reads env). */
 export function piSessionDir(cwd: string, env: NodeJS.ProcessEnv = process.env): string {
   const override = env.PI_CODING_AGENT_SESSION_DIR;
