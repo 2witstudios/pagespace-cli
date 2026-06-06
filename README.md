@@ -124,6 +124,9 @@ pagespace resume <id>
 (full fidelity — tool calls and all). Needs `PAGESPACE_MODEL_PAGE` set (the agent the sessions hang
 under). Hand-off is sequential (stop on A, resume on B); it's last-writer-wins, not live co-editing.
 
+Sync is **append-only**: each turn uploads just the new session lines (cheap for long sessions), with
+a full re-render on compaction/shutdown to refresh the readable transcript.
+
 ## Architecture
 
 PageSpace is the substrate — pi's filesystem, model/brain, memory, and task list — wired in

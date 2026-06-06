@@ -8,10 +8,13 @@
  * pulls the JSONL back into the local session dir and `pi --session <id>` continues it natively — full
  * fidelity, no PageSpace backend change, no SessionManager replacement.
  *
- * Each page carries a best-effort readable transcript (for humans) + the EXACT JSONL between sentinels
- * (the source of truth for resume). The pure render/parse/encode helpers are unit-tested; the
- * push/list/pull live wrappers are live-tested. The read-side helpers (encode/extract) are mirrored in
- * plain JS in `bin/pagespace.mjs` for the `sessions`/`resume` subcommands (same split as cli.ts ↔ bin).
+ * Each page carries a best-effort readable transcript (for humans) + the EXACT JSONL as the final,
+ * open-ended region (the source of truth for resume). Sync is **append-only**: ordinary turns insert
+ * just the new JSONL lines at end-of-page (O(delta)); a full re-render runs on compaction/shutdown to
+ * refresh the transcript, or when the offset can't be reconciled. The decision is the pure `planSync`;
+ * `pushSession` executes it. Pure helpers are unit-tested; the live wrappers are live-tested
+ * (`test/run-session-sync.ts`). The read-side helpers (encode/extract/resolve) are mirrored in plain JS
+ * in `bin/session-read.mjs` and kept honest by a drift-guard test.
  */
 import fs from "node:fs";
 import os from "node:os";
