@@ -1,21 +1,19 @@
 /**
  * PageSpace model brain for pi — a custom `streamSimple` over `POST /api/v1/chat/completions`
- * (model `ps-agent://<pageId>`, OpenAI SSE). The whole agentic tool loop stays in pi:
+ * (model `ps-agent://<pageId>`, OpenAI SSE) using **native function-calling**. The whole agentic
+ * tool loop stays in pi:
  *
- *   1. The v1 route now accepts client `tools`. The companion currently keeps a
- *      **prompted-tool protocol** for deterministic, model-agnostic behavior: the shim injects
- *      pi's real tool manifest + a strict output format into the system prompt; the model replies
- *      with a `<tool_call>{json}</tool_call>` text block; the shim parses it back into a pi
- *      `toolCall` so pi executes it locally.
- *   2. The route always injects a `finish` tool into the model's native manifest, which makes a
- *      capable model think `finish` is its only tool — so the protocol carries an explicit
- *      "ignore your native manifest" override (validated against claude-sonnet-4.6 via openrouter;
- *      glm-5 is too weak to follow the protocol reliably).
- *   3. The model emits the block and then keeps generating (it hallucinates a fake result). We
- *      parse the FIRST complete tool block and ABORT the HTTP stream — the route bills tokens
- *      burned so far and stops cleanly (its consumer-abort path), so the hallucinated tail costs
- *      almost nothing and never reaches pi.
+ *   1. We send pi's tools as an OpenAI `tools` array plus `disable_server_tools: true` — the v1
+ *      route's client-only mode (PageSpace #1559): the model is handed ONLY pi's tools, the agent
+ *      page's server-side tools and the forced `finish` tool are off, and tool calls are returned
+ *      to us instead of executed server-side.
+ *   2. The model streams native `delta.tool_calls[]` fragments (id + name, arguments concatenated,
+ *      keyed by `index`); we accumulate them and emit pi `toolCall` events so pi runs each tool
+ *      locally. Tool results go back as native `role:"tool"` messages (see `toOpenAIMessages`).
+ *   3. The route stops the step at the tool call (`finish_reason: "tool_calls"`) — no text-protocol
+ *      parsing, no hallucinated tail, no abort hack. Plain answers stream as `delta.content`.
  *
+ * (Superseded the prompted-tool TEXT shim once the route accepted client tools; see `tool-call-parser.ts`.)
  * Dependency-free: raw fetch + manual SSE parse, types from `@earendil-works/pi-ai`.
  */
 import type {
@@ -31,7 +29,6 @@ import type {
 } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { PageSpaceConfig } from "./config.ts";
-import { CLOSE, OPEN, ToolCallParser } from "./tool-call-parser.ts";
 
 /** Strip a `ps-agent://` prefix if present; the page id is what the route wants after the prefix. */
 function toAgentModel(modelId: string): string {
@@ -45,19 +42,6 @@ function textOf(content: string | (TextContent | { type: string })[]): string {
     .filter((c): c is TextContent => (c as TextContent).type === "text")
     .map((c) => c.text)
     .join("");
-}
-
-/** Serialize an assistant turn (text + tool calls) back into the prompted-tool wire form. */
-function serializeAssistant(message: Extract<Message, { role: "assistant" }>): string {
-  const parts: string[] = [];
-  for (const block of message.content) {
-    if (block.type === "text") parts.push(block.text);
-    else if (block.type === "toolCall") {
-      parts.push(`${OPEN}${JSON.stringify({ name: block.name, arguments: block.arguments })}${CLOSE}`);
-    }
-    // thinking blocks are dropped — they are not replayed to the model
-  }
-  return parts.join("\n").trim();
 }
 
 /** OpenAI-style chat message (native function-calling wire form). */
@@ -118,83 +102,6 @@ export function convertTools(tools: Tool[]): OpenAITool[] {
   }));
 }
 
-/** Convert pi's message history into the v1 `{role, content}` shape (text-only route). */
-function toV1Messages(context: Context): Array<{ role: string; content: string }> {
-  const out: Array<{ role: string; content: string }> = [];
-  for (const m of context.messages) {
-    if (m.role === "user") {
-      out.push({ role: "user", content: textOf(m.content) });
-    } else if (m.role === "assistant") {
-      const text = serializeAssistant(m);
-      if (text) out.push({ role: "assistant", content: text });
-    } else if (m.role === "toolResult") {
-      // The route has no native tool-call to attach a `tool` message to (we sent the call as
-      // text), so feed the result back as the next user turn — exactly what the protocol promises.
-      const body = textOf(m.content);
-      const tag = m.isError ? "ERROR" : "result";
-      out.push({
-        role: "user",
-        content: `Tool ${tag} for ${m.toolName} (call ${m.toolCallId}):\n${body}`,
-      });
-    }
-  }
-  return out;
-}
-
-/** The prompted-tool protocol + the live pi tool manifest, injected as a leading system message. */
-function buildSystemText(context: Context): string {
-  const sections: string[] = [];
-  if (context.systemPrompt?.trim()) sections.push(context.systemPrompt.trim());
-
-  sections.push(`# Tool protocol
-
-Your tools are executed by the harness on the user's machine. To use one, write a JSON block; the
-harness runs it and sends the result back as the next message. You never run tools yourself, and
-you get no result until you emit a block and stop.
-
-IMPORTANT — ignore your native function manifest. Your underlying API may expose a function-calling
-manifest containing only a \`finish\` tool, or no tools at all. IGNORE it completely; it is NOT how
-you act here. Never say you lack tools or cannot access the filesystem. The tools listed under
-"# Tools" below are real, and the ONLY way to use them is by emitting the \`<tool_call>\` block.
-
-CRITICAL — you do NOT already know the answer. You do NOT have the contents of any file, the state
-of the codebase, or the output of any command — not from the workspace/drive context, not from
-memory. If a request is about a file, the code, the filesystem, or a command's output, your FIRST
-action MUST be a tool call, even if you believe you know the answer. Guessing is a failure.
-
-To call a tool, output ONLY this and then stop generating:
-
-${OPEN}{"name": "<tool-name>", "arguments": { ...json args... }}${CLOSE}
-
-Hard rules:
-- One line, valid JSON, keys "name" and "arguments". When you call a tool the block is your ENTIRE
-  reply — no prose before or after, no apologies, and do NOT invent the result; stop and wait.
-- Never claim a tool is unavailable. Never answer a question about a file, the code, or a command
-  from memory or the workspace context — emit a tool call first.
-- Answer in plain text (no block) only for questions that need no file, code, or command at all.`);
-
-  const tools = context.tools ?? [];
-  if (tools.length > 0) {
-    const manifest = tools
-      .map((t) => `- ${t.name} — ${t.description}\n  arguments schema: ${JSON.stringify(t.parameters)}`)
-      .join("\n");
-    sections.push(`# Tools\n${manifest}`);
-  }
-
-  // Few-shot — anchors weaker models on the exact wire format. Uses the common pi tool names.
-  sections.push(`# Examples
-User: Show me the contents of README.md.
-Assistant: ${OPEN}{"name": "read", "arguments": {"path": "README.md"}}${CLOSE}
-
-User: How many TypeScript files are in src/?
-Assistant: ${OPEN}{"name": "bash", "arguments": {"command": "find src -name '*.ts' | wc -l"}}${CLOSE}
-
-User: What is 2 + 2?
-Assistant: 4`);
-
-  return sections.join("\n\n");
-}
-
 /** Build the custom streamSimple bound to a PageSpace config. */
 export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
   const endpoint = `${config.apiUrl.replace(/\/$/, "")}/api/v1/chat/completions`;
@@ -224,7 +131,7 @@ export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
       timestamp: Date.now(),
     };
 
-    // Internal abort: trip it once we've parsed a tool call so the route stops generating.
+    // Internal abort: propagates pi's outer cancellation to the upstream fetch.
     const internalAbort = new AbortController();
     const onOuterAbort = () => internalAbort.abort();
     const outerSignal = options?.signal;
@@ -264,48 +171,55 @@ export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
         textBlock = null;
       };
 
-      // Parse the prompted-tool protocol out of the streamed text (src/tool-call-parser.ts):
-      // accepts a `<tool_call>` block or a bare `{"name":…}` whose name is a real tool.
-      const parser = new ToolCallParser((context.tools ?? []).map((t) => t.name));
-      let toolCall: ToolCall | null = null;
+      // Native tool calls stream as OpenAI `delta.tool_calls[]` fragments keyed by `index`:
+      // id + function.name arrive in the first fragment, function.arguments are concatenated across
+      // fragments. We accumulate, then emit pi tool-call events once at the end (supports parallel calls).
+      const toolAcc = new Map<number, { id: string; name: string; args: string }>();
       let toolSeq = 0;
-
-      // Apply parser segments to the pi event stream. Returns true once a tool call is emitted
-      // (caller then stops reading + aborts the upstream).
-      const applySegments = (segs: ReturnType<ToolCallParser["feed"]>): boolean => {
-        for (const seg of segs) {
-          if (seg.type === "text") {
-            emitText(seg.delta);
-            continue;
+      const emitToolCalls = (): void => {
+        for (const index of [...toolAcc.keys()].sort((a, b) => a - b)) {
+          const acc = toolAcc.get(index);
+          if (!acc) continue;
+          let args: Record<string, any> = {};
+          try {
+            args = acc.args ? JSON.parse(acc.args) : {};
+          } catch {
+            // malformed argument JSON — keep the call with empty args rather than dropping it
           }
-          endText();
-          toolCall = {
+          const toolCall: ToolCall = {
             type: "toolCall",
-            id: `ps_${Date.now().toString(36)}_${toolSeq++}`,
-            name: seg.name,
-            arguments: seg.arguments as Record<string, any>,
+            id: acc.id || `ps_${Date.now().toString(36)}_${toolSeq++}`,
+            name: acc.name,
+            arguments: args,
           };
           const ci = blocks.push(toolCall) - 1;
           stream.push({ type: "toolcall_start", contentIndex: ci, partial: output });
-          stream.push({
-            type: "toolcall_delta",
-            contentIndex: ci,
-            delta: JSON.stringify(toolCall.arguments),
-            partial: output,
-          });
+          stream.push({ type: "toolcall_delta", contentIndex: ci, delta: acc.args || "{}", partial: output });
           stream.push({ type: "toolcall_end", contentIndex: ci, toolCall, partial: output });
-          output.stopReason = "toolUse";
-          return true;
         }
-        return false;
+        if (toolAcc.size > 0) output.stopReason = "toolUse";
       };
 
       try {
-        const messages = [{ role: "system", content: buildSystemText(context) }, ...toV1Messages(context)];
+        const oaMessages = toOpenAIMessages(context.messages);
+        const messages = context.systemPrompt?.trim()
+          ? [{ role: "system", content: context.systemPrompt.trim() }, ...oaMessages]
+          : oaMessages;
+        // Client-only native function-calling: hand the model pi's own tools and turn off the agent
+        // page's server-side tools (+ the forced `finish` tool) — pi runs the loop locally.
+        const body: Record<string, unknown> = {
+          model: toAgentModel(model.id),
+          stream: true,
+          messages,
+          disable_server_tools: true,
+        };
+        const tools = convertTools(context.tools ?? []);
+        if (tools.length > 0) body.tools = tools;
+
         const res = await fetch(endpoint, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({ model: toAgentModel(model.id), stream: true, messages }),
+          body: JSON.stringify(body),
           signal: internalAbort.signal,
         });
         if (!res.ok || !res.body) {
@@ -343,12 +257,17 @@ export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
             }
             if (json.usage)
               usageSeen = { input: json.usage.prompt_tokens, output: json.usage.completion_tokens };
-            const delta: string | undefined = json.choices?.[0]?.delta?.content;
-            if (typeof delta === "string" && delta.length > 0) {
-              if (applySegments(parser.feed(delta))) {
-                done = true;
-                internalAbort.abort(); // stop the route from billing the hallucinated tail
-                break outer;
+            const delta = json.choices?.[0]?.delta;
+            if (typeof delta?.content === "string" && delta.content.length > 0) emitText(delta.content);
+            if (Array.isArray(delta?.tool_calls)) {
+              for (const call of delta.tool_calls) {
+                const index = typeof call.index === "number" ? call.index : 0;
+                const acc = toolAcc.get(index) ?? { id: "", name: "", args: "" };
+                if (typeof call.id === "string" && call.id) acc.id = call.id;
+                if (typeof call.function?.name === "string" && call.function.name)
+                  acc.name = call.function.name;
+                if (typeof call.function?.arguments === "string") acc.args += call.function.arguments;
+                toolAcc.set(index, acc);
               }
             }
           }
@@ -359,12 +278,9 @@ export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
           /* already closed/aborted */
         }
 
-        if (!toolCall) {
-          // Plain answer: flush any held-back tail, close the text block.
-          applySegments(parser.flush());
-          endText();
-          output.stopReason = "stop";
-        }
+        endText();
+        emitToolCalls();
+        if (toolAcc.size === 0) output.stopReason = "stop";
         if (usageSeen) {
           output.usage.input = usageSeen.input ?? 0;
           output.usage.output = usageSeen.output ?? 0;
@@ -377,14 +293,7 @@ export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
         });
         stream.end();
       } catch (err) {
-        const aborted = internalAbort.signal.aborted && !toolCall && !!outerSignal?.aborted;
-        // An internal abort *after* a tool call is success, not error — but that path returns via
-        // the `done` push above, so reaching here with a toolCall means the abort raced the finalize.
-        if (toolCall) {
-          stream.push({ type: "done", reason: "toolUse", message: output });
-          stream.end();
-          return;
-        }
+        const aborted = internalAbort.signal.aborted && !!outerSignal?.aborted;
         output.stopReason = aborted ? "aborted" : "error";
         output.errorMessage = err instanceof Error ? err.message : String(err);
         stream.push({ type: "error", reason: output.stopReason, error: output });
