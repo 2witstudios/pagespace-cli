@@ -26,6 +26,7 @@ import type {
   Model,
   SimpleStreamOptions,
   TextContent,
+  Tool,
   ToolCall,
 } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
@@ -57,6 +58,64 @@ function serializeAssistant(message: Extract<Message, { role: "assistant" }>): s
     // thinking blocks are dropped — they are not replayed to the model
   }
   return parts.join("\n").trim();
+}
+
+/** OpenAI-style chat message (native function-calling wire form). */
+export interface OpenAIMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content?: string;
+  tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[];
+  tool_call_id?: string;
+}
+
+/** OpenAI-style tool/function definition sent in the request `tools` array. */
+export interface OpenAITool {
+  type: "function";
+  function: { name: string; description: string; parameters: unknown };
+}
+
+/**
+ * Convert pi's message history into OpenAI-native chat messages for the v1 client-tools mode:
+ * assistant turns carry `tool_calls` (arguments stringified), tool results become `role:"tool"`
+ * messages keyed by `tool_call_id`. Pure. (Replaces the prompted-tool `toV1Messages` text form.)
+ */
+export function toOpenAIMessages(messages: Message[]): OpenAIMessage[] {
+  const out: OpenAIMessage[] = [];
+  for (const m of messages) {
+    if (m.role === "user") {
+      out.push({ role: "user", content: textOf(m.content) });
+    } else if (m.role === "assistant") {
+      let text = "";
+      const toolCalls: NonNullable<OpenAIMessage["tool_calls"]> = [];
+      for (const block of m.content) {
+        if (block.type === "text") text += block.text;
+        else if (block.type === "toolCall") {
+          toolCalls.push({
+            id: block.id,
+            type: "function",
+            function: { name: block.name, arguments: JSON.stringify(block.arguments ?? {}) },
+          });
+        }
+        // thinking blocks are dropped — not replayed to the model
+      }
+      text = text.trim();
+      const msg: OpenAIMessage = { role: "assistant" };
+      if (text) msg.content = text;
+      if (toolCalls.length) msg.tool_calls = toolCalls;
+      if (msg.content !== undefined || msg.tool_calls) out.push(msg);
+    } else if (m.role === "toolResult") {
+      out.push({ role: "tool", tool_call_id: m.toolCallId, content: textOf(m.content) });
+    }
+  }
+  return out;
+}
+
+/** Convert pi's tool manifest into OpenAI function tool definitions. Pure. */
+export function convertTools(tools: Tool[]): OpenAITool[] {
+  return tools.map((t) => ({
+    type: "function",
+    function: { name: t.name, description: t.description, parameters: t.parameters },
+  }));
 }
 
 /** Convert pi's message history into the v1 `{role, content}` shape (text-only route). */
