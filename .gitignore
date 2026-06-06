@@ -12,3 +12,6 @@ auth.json
 
 # Harness-local dir (sessions/settings)
 .claude/
+
+# pure-point-guard per-project config (machine-absolute paths)
+.pu/

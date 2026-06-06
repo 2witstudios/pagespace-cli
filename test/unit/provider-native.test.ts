@@ -73,7 +73,7 @@ test("toOpenAIMessages: error tool result still role:tool", () => {
   ]);
   assert.equal(out[0].role, "tool");
   assert.equal(out[0].tool_call_id, "c2");
-  assert.match(out[0].content ?? "", /boom/);
+  assert.match(out[0].content ?? "", /^Error: boom/);
 });
 
 test("convertTools: maps to OpenAI function tool shape", () => {
