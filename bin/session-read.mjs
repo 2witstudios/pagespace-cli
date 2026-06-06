@@ -26,10 +26,11 @@ export function extractJsonl(content) {
   let region = content.slice(s + JSONL_BEGIN.length);
   const legacyEnd = region.indexOf(JSONL_END);
   if (legacyEnd !== -1) region = region.slice(0, legacyEnd);
-  const inner = region.split("\n");
-  while (inner.length && (inner[0].trim() === "" || /^```/.test(inner[0].trim()))) inner.shift();
-  while (inner.length && (inner.at(-1).trim() === "" || /^```$/.test(inner.at(-1).trim()))) inner.pop();
-  const body = inner.join("\n").trim();
+  // Keep only JSONL lines: drop blanks + the ```jsonl fence lines (tolerant of append-introduced blanks).
+  const body = region
+    .split("\n")
+    .filter((l) => l.trim() && !/^```/.test(l.trim()))
+    .join("\n");
   return body || null;
 }
 
