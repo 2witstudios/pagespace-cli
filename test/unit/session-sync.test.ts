@@ -5,9 +5,12 @@ import {
   extractJsonl,
   parseSessionHeader,
   parseSessionMeta,
+  type RemoteSession,
   renderSessionPage,
   renderTranscript,
+  resolveSession,
   sessionFileName,
+  sessionIdFromTitle,
 } from "../../src/session-sync.ts";
 
 const HEADER =
@@ -43,13 +46,43 @@ test("sessionFileName matches pi's <ts with :.->_<id>.jsonl", () => {
   assert.equal(sessionFileName(h), "2026-06-03T23-53-31-501Z_019e8fe8-126c-70bc-9870-3f8eef61d9de.jsonl");
 });
 
-test("parseSessionMeta derives id, short id, preview, turn count", () => {
+test("parseSessionMeta: title leads with the FULL id (shortId alone collides for uuidv7)", () => {
   const m = parseSessionMeta(SAMPLE);
   assert.equal(m.id, "019e8fe8-126c-70bc-9870-3f8eef61d9de");
   assert.equal(m.shortId, "019e8fe8");
   assert.equal(m.turns, 1);
   assert.match(m.preview, /read package\.json/);
-  assert.ok(m.title.startsWith("019e8fe8 · "));
+  assert.ok(m.title.startsWith(`${m.id} · `), "title must lead with the full id for unambiguous matching");
+  assert.equal(sessionIdFromTitle(m.title), m.id);
+});
+
+test("sessionIdFromTitle: extracts the full id even when the preview contains ' · '", () => {
+  assert.equal(
+    sessionIdFromTitle("019e8fe8-126c-70bc-9870-3f8eef61d9de · read a · b"),
+    "019e8fe8-126c-70bc-9870-3f8eef61d9de",
+  );
+});
+
+test("resolveSession: exact / unique-prefix / ambiguous-shortId / none — the real collision case", () => {
+  const S = (id: string, preview: string): RemoteSession => ({
+    pageId: `p_${id}`,
+    id,
+    shortId: id.slice(0, 8),
+    title: `${id} · ${preview}`,
+  });
+  // a + b share the uuidv7 shortId 019e8fe8 (sessions started in the same ~minute) — the bug.
+  const a = S("019e8fe8-126c-70bc-9870-3f8eef61d9de", "A");
+  const b = S("019e8fe8-7e40-7720-a7fe-a368eb7add75", "B");
+  const c = S("019e9860-aaaa-bbbb-cccc-ddddeeeeffff", "C");
+  const all = [a, b, c];
+  assert.equal(resolveSession(all, a.id).match?.id, a.id); // exact full id
+  assert.equal(resolveSession(all, "019e8fe8-126c").match?.id, a.id); // unique once the random segment is included
+  const amb = resolveSession(all, "019e8fe8"); // shortId alone is ambiguous
+  assert.equal(amb.match, undefined);
+  assert.deepEqual(amb.candidates.map((s) => s.id).sort(), [a.id, b.id].sort());
+  const none = resolveSession(all, "zzzz");
+  assert.equal(none.match, undefined);
+  assert.equal(none.candidates.length, 0);
 });
 
 test("renderTranscript shows user/assistant text and tool-call names, never throws", () => {

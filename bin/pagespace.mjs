@@ -172,7 +172,8 @@ function findNode(nodes, id) {
   }
   return null;
 }
-// Resolve the agent's `Sessions` folder children → [{pageId, shortId, title}]. Returns [] if none.
+// Resolve the agent's `Sessions` folder children → [{pageId, id, title}]. Returns [] if none.
+// Titles lead with the FULL session id (`<id> · <preview>`) — see src/session-sync.ts.
 async function remoteSessions(cfg) {
   const drives = await getJson(`${cfg.base}/api/drives`, cfg.headers);
   const list = Array.isArray(drives) ? drives : (drives?.drives ?? []);
@@ -182,7 +183,14 @@ async function remoteSessions(cfg) {
   const agent = findNode(tree, cfg.agent);
   const folder = (agent?.children ?? []).find((p) => p.title === SESSIONS_FOLDER && p.type === "FOLDER");
   const docs = (folder?.children ?? []).filter((p) => p.type === "DOCUMENT");
-  return docs.map((p) => ({ pageId: p.id, shortId: p.title.split(" ")[0], title: p.title }));
+  return docs.map((p) => ({ pageId: p.id, id: p.title.split(" · ")[0], title: p.title }));
+}
+// Exact full-id match wins; else a unique prefix. Multiple prefix hits → ambiguous (candidates).
+function resolveSessionRef(sessions, ref) {
+  const exact = sessions.find((s) => s.id === ref);
+  if (exact) return { match: exact, candidates: [exact] };
+  const candidates = sessions.filter((s) => s.id.startsWith(ref));
+  return { match: candidates.length === 1 ? candidates[0] : undefined, candidates };
 }
 async function readPage(cfg, pageId) {
   const r = await fetch(`${cfg.base}/api/mcp/documents`, {
@@ -210,17 +218,22 @@ async function sessionsCommand() {
   }
 }
 
-async function resumeCommand(idPrefix, rest) {
-  if (!idPrefix) {
+async function resumeCommand(ref, rest) {
+  if (!ref) {
     console.error("usage: pagespace resume <session-id>   (list ids with: pagespace sessions)");
     process.exit(1);
   }
   const cfg = apiCfg();
   try {
     const sessions = await remoteSessions(cfg);
-    const match = sessions.find((s) => s.shortId.startsWith(idPrefix) || idPrefix.startsWith(s.shortId));
+    const { match, candidates } = resolveSessionRef(sessions, ref);
     if (!match) {
-      console.error(`pagespace: no synced session matching "${idPrefix}". Try: pagespace sessions`);
+      if (candidates.length > 1) {
+        console.error(`pagespace: "${ref}" is ambiguous (${candidates.length} sessions) — use a longer id:`);
+        for (const s of candidates) console.error(`  ${s.id}`);
+      } else {
+        console.error(`pagespace: no synced session matching "${ref}". Try: pagespace sessions`);
+      }
       process.exit(1);
     }
     const jsonl = extractJsonl(await readPage(cfg, match.pageId));

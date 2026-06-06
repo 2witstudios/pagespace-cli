@@ -118,7 +118,30 @@ export function parseSessionMeta(jsonl: string): SessionMeta {
   }
   const shortId = id.slice(0, 8);
   preview = preview.replace(/\s+/g, " ").trim().slice(0, 60) || "(no prompt yet)";
-  return { id, shortId, title: `${shortId} · ${preview}`, preview, turns };
+  // The title LEADS with the full id (not the 8-char shortId): pi ids are uuidv7, whose first 8 hex
+  // chars are a ~65s timestamp bucket, so two sessions started in the same minute share a shortId.
+  // Matching/identity uses the full id (sessionIdFromTitle); the shortId is for display only.
+  return { id, shortId, title: `${id} · ${preview}`, preview, turns };
+}
+
+/** The full session id from a `${id} · ${preview}` page title (ids contain no spaces). Pure. */
+export function sessionIdFromTitle(title: string): string {
+  return title.split(" · ")[0];
+}
+
+/**
+ * Resolve a user-supplied session ref against the known sessions. An exact full-id match wins;
+ * otherwise prefix matches are considered — a single hit is the match, multiple hits are returned as
+ * `candidates` (ambiguous, e.g. a bare shortId), none → empty candidates. Pure.
+ */
+export function resolveSession(
+  sessions: RemoteSession[],
+  ref: string,
+): { match?: RemoteSession; candidates: RemoteSession[] } {
+  const exact = sessions.find((s) => s.id === ref);
+  if (exact) return { match: exact, candidates: [exact] };
+  const candidates = sessions.filter((s) => s.id.startsWith(ref));
+  return { match: candidates.length === 1 ? candidates[0] : undefined, candidates };
 }
 
 /** Best-effort readable transcript from the JSONL. Pure. Never throws; unknown entries are skipped. */
@@ -280,8 +303,9 @@ export async function pushSession(
 
   const driveId = await driveIdFor(resolver, driveSlug);
   const folderId = await ensureSessionsFolder(api, resolver, driveId, agentPageId);
-  const existing = (await resolver.children(driveId, folderId)).find((p) =>
-    p.title.startsWith(`${meta.shortId} `),
+  // Match the existing page by FULL id (not shortId) so a same-minute sibling isn't overwritten.
+  const existing = (await resolver.children(driveId, folderId)).find(
+    (p) => sessionIdFromTitle(p.title) === sessionId,
   );
   if (existing) {
     await api.patchPage(existing.id, { content });
@@ -301,6 +325,9 @@ export async function pushSession(
 
 export interface RemoteSession {
   pageId: string;
+  /** Full session id (the matching/identity key). */
+  id: string;
+  /** First 8 chars — for display only; NOT unique across same-minute sessions. */
   shortId: string;
   title: string;
 }
@@ -320,19 +347,25 @@ export async function listAgentSessions(
   const kids = await resolver.children(driveId, folder.id);
   return kids
     .filter((p) => p.type === "DOCUMENT")
-    .map((p) => ({ pageId: p.id, shortId: p.title.split(" ")[0], title: p.title }));
+    .map((p) => {
+      const id = sessionIdFromTitle(p.title);
+      return { pageId: p.id, id, shortId: id.slice(0, 8), title: p.title };
+    });
 }
 
-/** Fetch a remote session's JSONL by short-id prefix. Returns the JSONL string, or null if not found. */
+/**
+ * Fetch a remote session's JSONL by id (exact or unambiguous prefix). Returns the JSONL, or null when
+ * the ref matches no session or is ambiguous (use a longer id — `pagespace sessions` lists them).
+ */
 export async function pullSession(
   api: PageSpaceApi,
   resolver: PageSpaceResolver,
   driveSlug: string,
   agentPageId: string,
-  idPrefix: string,
+  ref: string,
 ): Promise<string | null> {
   const sessions = await listAgentSessions(api, resolver, driveSlug, agentPageId);
-  const match = sessions.find((s) => s.shortId.startsWith(idPrefix) || idPrefix.startsWith(s.shortId));
+  const { match } = resolveSession(sessions, ref);
   if (!match) return null;
   const content = await api.readContent(match.pageId);
   return extractJsonl(content);
