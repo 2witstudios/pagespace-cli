@@ -16,9 +16,7 @@ import {
   sessionIdFromTitle,
 } from "./session-read.mjs";
 
-const binDir = path.dirname(fileURLToPath(import.meta.url));
-const packageDir = path.resolve(binDir, "..");
-const extensionPath = path.join(binDir, "..", "extensions", "pagespace.ts");
+const extensionPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "extensions", "pagespace.ts");
 
 // Source PAGESPACE_* from the nearest .env/.env.local (shell env wins) so `pagespace status` and the
 // spawned pi see the same config. Mirrors src/env.ts (kept here in plain JS — the bin has no TS loader).
@@ -119,7 +117,7 @@ function launchPi(passthrough) {
   const skillFlags = userManagesSkills ? [] : ["--no-skills", ...vendoredSkillFlags()];
   const child = spawn("pi", ["-e", extensionPath, ...skillFlags, ...passthrough], {
     stdio: "inherit",
-    env: { ...process.env, PI_SKIP_VERSION_CHECK: "1", PI_PACKAGE_DIR: packageDir },
+    env: { ...process.env, PI_SKIP_VERSION_CHECK: "1" },
   });
   child.on("error", (err) => {
     console.error(

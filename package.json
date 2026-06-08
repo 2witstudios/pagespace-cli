@@ -18,10 +18,6 @@
   "bugs": {
     "url": "https://github.com/2witstudios/pagespace-cli/issues"
   },
-  "piConfig": {
-    "name": "pagespace",
-    "configDir": ".pi"
-  },
   "pi": {
     "extensions": [
       "./extensions"
