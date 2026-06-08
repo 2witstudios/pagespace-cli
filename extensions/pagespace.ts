@@ -43,10 +43,14 @@ import { registerBuildTool } from "../src/build.ts";
 import { registerPageSpaceProvider } from "../src/provider.ts";
 
 export default function (pi: ExtensionAPI) {
+  // Override the process title that pi sets (process.title = "pi") so terminal apps like iTerm2
+  // show "pagespace" instead of "pi" in the process-name portion of the title bar.
+  process.title = "pagespace";
   // Source PAGESPACE_* from a project .env/.env.local before reading config, so the brain provider
   // registers under plain `pi` without the user having to export vars in every shell (shell wins).
   loadDotenv(path.dirname(fileURLToPath(import.meta.url)));
   const config = loadConfig();
+  config.conversationId = globalThis.crypto.randomUUID();
   const api = new PageSpaceApi(config);
   const resolver = new PageSpaceResolver(api);
   const cwd = process.cwd();
