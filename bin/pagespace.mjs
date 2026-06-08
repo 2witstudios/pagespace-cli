@@ -115,7 +115,10 @@ function launchPi(passthrough) {
   const userManagesSkills =
     passthrough.includes("--no-skills") || passthrough.includes("-ns") || passthrough.includes("--skill");
   const skillFlags = userManagesSkills ? [] : ["--no-skills", ...vendoredSkillFlags()];
-  const child = spawn("pi", ["-e", extensionPath, ...skillFlags, ...passthrough], { stdio: "inherit" });
+  const child = spawn("pi", ["-e", extensionPath, ...skillFlags, ...passthrough], {
+    stdio: "inherit",
+    env: { ...process.env, PI_SKIP_VERSION_CHECK: "1" },
+  });
   child.on("error", (err) => {
     console.error(
       `pagespace: failed to launch pi (${err.message}). Is pi installed?  npm i -g @earendil-works/pi-coding-agent`,
