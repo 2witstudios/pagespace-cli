@@ -32,7 +32,6 @@ import { createContextEngine } from "../src/context-engine.ts";
 import { formatRetrievedNotes, retrieveBrainNotes } from "../src/retrieval.ts";
 import { appendToPage, extractEntryInput, formatSessionEntry } from "../src/persistence.ts";
 import { persistCompactionSummary } from "../src/compaction.ts";
-import { pushSession } from "../src/session-sync.ts";
 import { MAX_SUBAGENT_DEPTH, currentDepth, registerSubagentTool } from "../src/subagent.ts";
 import { registerRequirementsTool } from "../src/requirements.ts";
 import { registerReviewTool } from "../src/review.ts";
@@ -194,31 +193,6 @@ export default function (pi: ExtensionAPI) {
     const driveSlug = config.defaultDriveSlug;
     const contextEngine = createContextEngine(api, resolver, driveSlug);
 
-    // Cross-machine resume: mirror the local pi session JSONL to a page UNDER the Companion Agent, so a
-    // session started here can be pulled + continued elsewhere (`pagespace resume <id>` → `pi --session`).
-    // Keyed by the stable session id; best-effort, never breaks the session. Needs a configured agent page.
-    const agentPageId = config.modelPageId;
-    // Append-only on ordinary turns (cheap); `full` re-renders the readable transcript/header on
-    // compaction + shutdown so the human-readable snapshot is current (the JSONL stays live either way).
-    const syncSession = async (
-      ctx: {
-        sessionManager: { getSessionId(): string; getCwd(): string; getSessionFile(): string | undefined };
-      },
-      full = false,
-    ): Promise<void> => {
-      if (!agentPageId) return;
-      try {
-        const sm = ctx.sessionManager;
-        await pushSession(api, resolver, driveSlug, agentPageId, sm.getSessionId(), {
-          cwd: sm.getCwd(),
-          file: sm.getSessionFile(),
-          full,
-        });
-      } catch {
-        // sync must never break the session
-      }
-    };
-
     pi.on("before_agent_start", async (event) => {
       let systemPrompt = event.systemPrompt;
       const standing = await contextEngine.get().catch(() => "");
@@ -231,7 +205,7 @@ export default function (pi: ExtensionAPI) {
 
     // Auto-persist on lifecycle: when the agent finishes handling a request, append a concise entry
     // to the drive's Activity Log so progress is durably recorded without the model choosing to.
-    pi.on("agent_end", async (event, ctx) => {
+    pi.on("agent_end", async (event) => {
       try {
         const input = extractEntryInput((event.messages ?? []) as { role?: string; content?: unknown }[]);
         if (!input) return;
@@ -240,12 +214,11 @@ export default function (pi: ExtensionAPI) {
       } catch {
         // persistence must never break the session
       }
-      await syncSession(ctx);
     });
 
     // Compaction -> durable memory: when pi compacts the context, route the summary to a durable
     // PageSpace page so the knowledge outlives the session.
-    pi.on("session_compact", async (event, ctx) => {
+    pi.on("session_compact", async (event) => {
       try {
         const entry = (event as { compactionEntry?: { summary?: string; tokensBefore?: number } })
           .compactionEntry;
@@ -257,11 +230,6 @@ export default function (pi: ExtensionAPI) {
       } catch {
         // persistence must never break the session
       }
-      await syncSession(ctx, true); // compaction changed the transcript shape — full re-render
-    });
-
-    pi.on("session_shutdown", async (_event, ctx) => {
-      await syncSession(ctx, true); // final snapshot — full re-render
     });
   }
 

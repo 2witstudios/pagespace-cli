@@ -1,4 +1,5 @@
 import type { PageSpaceConfig } from "./config.ts";
+import type { ConvMessage } from "./provider.ts";
 
 export interface Drive {
   id: string;
@@ -194,5 +195,37 @@ export class PageSpaceApi {
   ): Promise<{ results: RegexMatch[] }> {
     const qs = new URLSearchParams({ pattern, searchIn, maxResults: String(maxResults) });
     return this.request("GET", `/api/drives/${driveId}/search/regex?${qs.toString()}`);
+  }
+
+  /** List pi sessions for the agent page (GET /api/ai/page-agents/:agentId/conversations). */
+  async listAgentConversations(agentId: string): Promise<
+    {
+      id: string;
+      title: string;
+      preview: string;
+      createdAt: string;
+      updatedAt: string;
+      messageCount: number;
+    }[]
+  > {
+    const r = await this.request<{
+      conversations?: {
+        id: string;
+        title: string;
+        preview: string;
+        createdAt: string;
+        updatedAt: string;
+        messageCount: number;
+      }[];
+    }>("GET", `/api/ai/page-agents/${agentId}/conversations`);
+    return r.conversations ?? [];
+  }
+
+  /** Get the full message list for a conversation (GET /api/v1/conversations/:id). */
+  getConversation(conversationId: string): Promise<{ id: string; messages: ConvMessage[] }> {
+    return this.request<{ id: string; messages: ConvMessage[] }>(
+      "GET",
+      `/api/v1/conversations/${conversationId}`,
+    );
   }
 }

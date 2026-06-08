@@ -7,14 +7,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  encodeCwdDir,
-  extractJsonl,
-  parseHeader,
-  resolveSessionRef,
-  SESSIONS_FOLDER,
-  sessionIdFromTitle,
-} from "./session-read.mjs";
+/** Reproduce pi's cwd → session-dir name: `--<cwd without leading slash, / \\ : → ->--`. */
+const encodeCwdDir = (cwd) => `--${cwd.replace(/^[\/\\]/, "").replace(/[\/\\:]/g, "-")}--`;
 
 const extensionPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "extensions", "pagespace.ts");
 
@@ -152,47 +146,70 @@ async function getJson(url, headers) {
   if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
   return r.json();
 }
-function findNode(nodes, id) {
-  for (const n of nodes ?? []) {
-    if (n.id === id) return n;
-    const hit = findNode(n.children, id);
-    if (hit) return hit;
+async function listAgentConversations(cfg) {
+  const r = await getJson(`${cfg.base}/api/ai/page-agents/${cfg.agent}/conversations`, cfg.headers);
+  return r.conversations ?? [];
+}
+async function getConversation(id, cfg) {
+  return getJson(`${cfg.base}/api/v1/conversations/${id}`, cfg.headers);
+}
+
+const EMPTY_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+function fromConvMessages(messages, { provider = "pagespace", modelId = "" } = {}) {
+  const out = [];
+  for (const m of messages) {
+    const ts = (m.created_at ?? 0) * 1000;
+    if (m.role === "user") {
+      out.push({ role: "user", content: [{ type: "text", text: m.content ?? "" }], timestamp: ts });
+    } else if (m.role === "assistant") {
+      const content = [];
+      if (m.content) content.push({ type: "text", text: m.content });
+      const toolCalls = m.tool_calls ?? [];
+      for (const tc of toolCalls) {
+        let args = {};
+        try { args = JSON.parse(tc.function.arguments); } catch {}
+        content.push({ type: "toolCall", id: tc.id, name: tc.function.name, arguments: args });
+      }
+      if (content.length > 0) {
+        out.push({ role: "assistant", content, api: "openai-completions", provider, model: modelId, usage: EMPTY_USAGE, stopReason: toolCalls.length > 0 ? "toolUse" : "stop", timestamp: ts });
+      }
+      for (const tc of toolCalls) {
+        out.push({ role: "toolResult", toolCallId: tc.id, toolName: tc.function.name, content: [{ type: "text", text: "(result not stored)" }], isError: false, timestamp: ts });
+      }
+    }
   }
-  return null;
+  return out;
 }
-// Resolve the agent's `Sessions` folder children → [{pageId, id, title}]. Returns [] if none.
-// Titles lead with the FULL session id (`<id> · <preview>`) — see src/session-sync.ts.
-async function remoteSessions(cfg) {
-  const drives = await getJson(`${cfg.base}/api/drives`, cfg.headers);
-  const list = Array.isArray(drives) ? drives : (drives?.drives ?? []);
-  const drive = list.find((d) => d.slug === cfg.drive);
-  if (!drive) throw new Error(`no drive with slug "${cfg.drive}"`);
-  const tree = await getJson(`${cfg.base}/api/drives/${drive.id}/pages`, cfg.headers);
-  const agent = findNode(tree, cfg.agent);
-  const folder = (agent?.children ?? []).find((p) => p.title === SESSIONS_FOLDER && p.type === "FOLDER");
-  const docs = (folder?.children ?? []).filter((p) => p.type === "DOCUMENT");
-  return docs.map((p) => ({ pageId: p.id, id: sessionIdFromTitle(p.title), title: p.title }));
-}
-async function readPage(cfg, pageId) {
-  const r = await fetch(`${cfg.base}/api/mcp/documents`, {
-    method: "POST",
-    headers: cfg.headers,
-    body: JSON.stringify({ operation: "read", pageId }),
-  });
-  if (!r.ok) throw new Error(`HTTP ${r.status} reading page`);
-  return (await r.json())?.content ?? "";
+function randHex8() { return Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, "0"); }
+function buildResumeJsonl(convId, messages, { cwd, provider, modelId } = {}) {
+  const now = new Date().toISOString();
+  const lines = [];
+  lines.push(JSON.stringify({ type: "session", version: 3, id: convId, timestamp: now, cwd: cwd || process.cwd() }));
+  const mcId = randHex8();
+  lines.push(JSON.stringify({ type: "model_change", id: mcId, parentId: null, timestamp: now, provider: provider || "pagespace", modelId: modelId || "" }));
+  let prevId = mcId;
+  for (const msg of fromConvMessages(messages, { provider, modelId })) {
+    const id = randHex8();
+    const ts = msg.timestamp ? new Date(msg.timestamp).toISOString() : now;
+    lines.push(JSON.stringify({ type: "message", id, parentId: prevId, timestamp: ts, message: msg }));
+    prevId = id;
+  }
+  return lines.join("\n") + "\n";
 }
 
 async function sessionsCommand() {
   const cfg = apiCfg();
   try {
-    const sessions = await remoteSessions(cfg);
-    if (!sessions.length) {
-      console.log("No synced sessions yet. Run a `pagespace` session and they appear under the agent.");
+    const convs = await listAgentConversations(cfg);
+    if (!convs.length) {
+      console.log("No conversations yet. Start a pagespace session and it will appear here.");
       return;
     }
-    console.log(`Synced sessions (resume with: pagespace resume <id>):\n`);
-    for (const s of sessions) console.log(`  ${s.title}`);
+    console.log("Conversations (resume with: pagespace resume <id>):\n");
+    for (const c of convs) {
+      const updated = new Date(c.updatedAt).toLocaleString();
+      console.log(`  ${c.id}  ${updated}  ${c.preview || ""}`);
+    }
   } catch (err) {
     console.error(`pagespace: ${err.message}`);
     process.exit(1);
@@ -201,38 +218,39 @@ async function sessionsCommand() {
 
 async function resumeCommand(ref, rest) {
   if (!ref) {
-    console.error("usage: pagespace resume <session-id>   (list ids with: pagespace sessions)");
+    console.error("usage: pagespace resume <conversation-id>   (list with: pagespace sessions)");
     process.exit(1);
   }
   const cfg = apiCfg();
   try {
-    const sessions = await remoteSessions(cfg);
-    const { match, candidates } = resolveSessionRef(sessions, ref);
+    const convs = await listAgentConversations(cfg);
+    const exact = convs.find((c) => c.id === ref);
+    const candidates = convs.filter((c) => c.id.startsWith(ref));
+    const match = exact || (candidates.length === 1 ? candidates[0] : undefined);
     if (!match) {
       if (candidates.length > 1) {
-        console.error(`pagespace: "${ref}" is ambiguous (${candidates.length} sessions) — use a longer id:`);
-        for (const s of candidates) console.error(`  ${s.id}`);
+        console.error(`pagespace: "${ref}" is ambiguous — use a longer id:`);
+        for (const c of candidates) console.error(`  ${c.id}`);
       } else {
-        console.error(`pagespace: no synced session matching "${ref}". Try: pagespace sessions`);
+        console.error(`pagespace: no conversation matching "${ref}". Try: pagespace sessions`);
       }
       process.exit(1);
     }
-    const jsonl = extractJsonl(await readPage(cfg, match.pageId));
-    const header = jsonl && parseHeader(jsonl);
-    if (!jsonl || !header) {
-      console.error("pagespace: that session page has no embedded session data to resume.");
+    const conv = await getConversation(match.id, cfg);
+    if (!conv.messages?.length) {
+      console.error("pagespace: that conversation has no messages to resume.");
       process.exit(1);
     }
-    const cwd = header.cwd || process.cwd();
+    const cwd = process.cwd();
     const dir = process.env.PI_CODING_AGENT_SESSION_DIR
       ? process.env.PI_CODING_AGENT_SESSION_DIR
       : path.join(os.homedir(), ".pi", "agent", "sessions", encodeCwdDir(cwd));
     fs.mkdirSync(dir, { recursive: true });
-    const fileName = `${(header.timestamp || "").replace(/[:.]/g, "-")}_${header.id}.jsonl`;
-    const dest = path.join(dir, fileName);
-    fs.writeFileSync(dest, jsonl.endsWith("\n") ? jsonl : `${jsonl}\n`);
-    process.stderr.write(`pagespace · resuming session ${header.id.slice(0, 8)} (${match.title})\n`);
-    launchPi(["--session", header.id, ...rest]);
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const dest = path.join(dir, `${ts}_${match.id}.jsonl`);
+    fs.writeFileSync(dest, buildResumeJsonl(match.id, conv.messages, { cwd, provider: "pagespace", modelId: cfg.agent }));
+    process.stderr.write(`pagespace · resuming conversation ${match.id.slice(0, 8)} (${match.preview || match.id})\n`);
+    launchPi(["--session", match.id, ...rest]);
   } catch (err) {
     console.error(`pagespace: ${err.message}`);
     process.exit(1);
