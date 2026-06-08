@@ -3,10 +3,21 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "PageSpace-native pi companion — dual-mount files (PageSpace pages as pi's filesystem) + PageSpace chat as pi's model brain.",
+  "description": "The PageSpace coding harness — deterministic AIDD primitives with PageSpace as the filesystem, model brain, memory, and task board.",
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "pagespace",
+    "coding-harness",
+    "aidd"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/2witstudios/pagespace-cli.git"
+  },
+  "homepage": "https://github.com/2witstudios/pagespace-cli#readme",
+  "bugs": {
+    "url": "https://github.com/2witstudios/pagespace-cli/issues"
+  },
   "pi": {
     "extensions": [
       "./extensions"

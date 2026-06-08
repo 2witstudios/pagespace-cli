@@ -2,8 +2,8 @@
  * Fan-out / sub-agent primitive (Epic 3) — adapted from pi's `examples/extensions/subagent`.
  *
  * AIDD's agent-orchestration (fan-out / parallel / delegate) is mechanism, so it belongs in the
- * harness as a deterministic primitive rather than a model-discretion skill. This spawns child pi
- * processes (`pi --mode json -p --no-session`) for sub-tasks — single or parallel — and parses
+ * harness as a deterministic primitive rather than a model-discretion skill. This spawns child pagespace
+ * processes (`pagespace --mode json -p --no-session`) for sub-tasks — single or parallel — and parses
  * their NDJSON output. Children inherit the environment, so a PageSpace-native parent yields
  * PageSpace-native children (same brain + dual-mount). The cloud form (Epic 6) swaps the local
  * spawn for PageSpace-launched containers behind the same interface.
@@ -42,7 +42,7 @@ export interface SubagentResult {
   errorMessage?: string;
 }
 
-export interface PiSubagentOptions {
+export interface PagespaceSubagentOptions {
   /** Model pattern for the child (e.g. "pagespace/<brainPageId>"). */
   model?: string;
   /** Allowlist of tool names for the child (pi `--tools`). */
@@ -51,8 +51,8 @@ export interface PiSubagentOptions {
   appendSystemPromptPath?: string;
 }
 
-/** Build the argv for a `pi --mode json` child run. Pure. */
-export function buildPiArgs(task: string, opts: PiSubagentOptions = {}): string[] {
+/** Build the argv for a pagespace child run (`--mode json`). Pure. */
+export function buildPiArgs(task: string, opts: PagespaceSubagentOptions = {}): string[] {
   const args = ["--mode", "json", "-p", "--no-session"];
   if (opts.model) args.push("--model", opts.model);
   if (opts.tools && opts.tools.length > 0) args.push("--tools", opts.tools.join(","));
@@ -61,7 +61,7 @@ export function buildPiArgs(task: string, opts: PiSubagentOptions = {}): string[
   return args;
 }
 
-/** Parse pi's `--mode json` NDJSON stream into a single result. Pure. Last assistant text wins. */
+/** Parse pagespace's `--mode json` NDJSON stream into a single result. Pure. Last assistant text wins. */
 export function parseJsonModeOutput(stdout: string): SubagentResult {
   const result: SubagentResult = { text: "", turns: 0, toolCalls: 0 };
   for (const line of stdout.split("\n")) {
@@ -94,7 +94,7 @@ export interface SpawnOptions {
   env?: NodeJS.ProcessEnv;
 }
 
-/** Spawn a command, collect stdout/stderr, and parse it as pi `--mode json` output. */
+/** Spawn a command, collect stdout/stderr, and parse it as pagespace output. */
 export async function runViaCommand(
   command: string,
   args: string[],
@@ -124,12 +124,12 @@ export async function runViaCommand(
   return result;
 }
 
-/** Run a single sub-task as a `pi` child. `opts.command` (default "pi") allows a stub in tests. */
-export async function runPiSubagent(
+/** Run a single sub-task as a pagespace child. `opts.command` (default "pagespace") allows a stub in tests. */
+export async function runPagespaceSubagent(
   task: string,
-  opts: PiSubagentOptions & { command?: string } & SpawnOptions = {},
+  opts: PagespaceSubagentOptions & { command?: string } & SpawnOptions = {},
 ): Promise<SubagentResult> {
-  return runViaCommand(opts.command ?? "pi", buildPiArgs(task, opts), opts);
+  return runViaCommand(opts.command ?? "pagespace", buildPiArgs(task, opts), opts);
 }
 
 export interface FanoutTask {
@@ -138,14 +138,14 @@ export interface FanoutTask {
   tools?: string[];
 }
 
-/** Run sub-tasks in parallel as pi children (the fan-out primitive). */
-export async function runFanout(
+/** Run sub-tasks in parallel as pagespace children (the fan-out primitive). */
+export async function runPagespaceFanout(
   tasks: FanoutTask[],
   opts: { command?: string; model?: string; tools?: string[] } & SpawnOptions = {},
 ): Promise<SubagentResult[]> {
   return Promise.all(
     tasks.map((t) =>
-      runPiSubagent(t.task, {
+      runPagespaceSubagent(t.task, {
         ...opts,
         model: t.model ?? opts.model,
         tools: t.tools ?? opts.tools,
@@ -166,7 +166,7 @@ export function registerSubagentTool(
   pi.registerTool({
     name: "subagent",
     label: "subagent",
-    description: `Delegate to pi sub-agent(s) in child processes. Provide \`task\` for one, or \`tasks\` (array of {task}) to fan out in parallel (max ${MAX_PARALLEL}). Each child is a fresh, PageSpace-native pi; returns their final answers. Use for independent, parallelizable work.`,
+    description: `Delegate to pagespace sub-agent(s) in child processes. Provide \`task\` for one, or \`tasks\` (array of {task}) to fan out in parallel (max ${MAX_PARALLEL}). Each child is a fresh pagespace process; returns their final answers. Use for independent, parallelizable work.`,
     parameters: Type.Object({
       task: Type.Optional(Type.String({ description: "A single sub-task prompt." })),
       tasks: Type.Optional(
@@ -189,14 +189,14 @@ export function registerSubagentTool(
             details: {},
           };
         }
-        const results = await runFanout(params.tasks, { model: opts.model, env, signal });
+        const results = await runPagespaceFanout(params.tasks, { model: opts.model, env, signal });
         const text = results
           .map((r, i) => `### sub-agent ${i + 1}\n${r.errorMessage ? `ERROR: ${r.errorMessage}` : r.text}`)
           .join("\n\n");
         return { content: [{ type: "text", text }], details: { results } };
       }
       if (params.task) {
-        const r = await runPiSubagent(params.task, { model: opts.model, env, signal });
+        const r = await runPagespaceSubagent(params.task, { model: opts.model, env, signal });
         return {
           content: [{ type: "text", text: r.errorMessage ? `ERROR: ${r.errorMessage}` : r.text }],
           details: { result: r },

@@ -111,7 +111,7 @@ function vendoredSkillFlags() {
 // default path and by `resume` (which adds `--session <id>`).
 function launchPi(passthrough) {
   const quiet = passthrough.includes("-p") || passthrough.includes("--print") || passthrough.includes("--mode");
-  if (!quiet) process.stderr.write("pagespace · PageSpace-native pi (dual-mount + PageSpace brain)\n");
+  if (!quiet) process.stderr.write("pagespace · the PageSpace coding harness\n");
   const userManagesSkills =
     passthrough.includes("--no-skills") || passthrough.includes("-ns") || passthrough.includes("--skill");
   const skillFlags = userManagesSkills ? [] : ["--no-skills", ...vendoredSkillFlags()];
