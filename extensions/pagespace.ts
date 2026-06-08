@@ -9,6 +9,7 @@
  * (test/run-ops.ts). This entry wires them into pi's tools; needs a pi load to verify end to end.
  */
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   createReadTool,
@@ -41,7 +42,7 @@ import { registerPageSpaceProvider } from "../src/provider.ts";
 export default function (pi: ExtensionAPI) {
   // Source PAGESPACE_* from a project .env/.env.local before reading config, so the brain provider
   // registers under plain `pi` without the user having to export vars in every shell (shell wins).
-  loadDotenv();
+  loadDotenv(path.dirname(fileURLToPath(import.meta.url)));
   const config = loadConfig();
   const api = new PageSpaceApi(config);
   const resolver = new PageSpaceResolver(api);
