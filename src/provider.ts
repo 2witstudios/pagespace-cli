@@ -103,6 +103,77 @@ export function convertTools(tools: Tool[]): OpenAITool[] {
   }));
 }
 
+/** OpenAI-format message as stored by GET /api/v1/conversations/:id. */
+export interface ConvMessage {
+  id: string;
+  role: string;
+  content: string | null;
+  tool_calls?: { id: string; type: string; function: { name: string; arguments: string } }[];
+  created_at: number;
+}
+
+/**
+ * Convert stored OpenAI messages (from GET /api/v1/conversations/:id) back to pi Message[].
+ * Tool results are not stored server-side so we emit a placeholder to keep pi's structure valid.
+ * Pure, no side effects.
+ */
+export function fromConversationMessages(
+  messages: ConvMessage[],
+  opts: { provider?: string; modelId?: string } = {},
+): Message[] {
+  const out: Message[] = [];
+  const emptyUsage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+  for (const m of messages) {
+    const ts = m.created_at * 1000;
+    if (m.role === "user") {
+      out.push({ role: "user", content: [{ type: "text", text: m.content ?? "" }], timestamp: ts });
+    } else if (m.role === "assistant") {
+      const content: (TextContent | ToolCall)[] = [];
+      if (m.content) content.push({ type: "text", text: m.content });
+      const toolCalls = m.tool_calls ?? [];
+      for (const tc of toolCalls) {
+        let args: Record<string, unknown> = {};
+        try {
+          args = JSON.parse(tc.function.arguments);
+        } catch {
+          // keep empty args on malformed JSON
+        }
+        content.push({ type: "toolCall", id: tc.id, name: tc.function.name, arguments: args });
+      }
+      if (content.length > 0) {
+        out.push({
+          role: "assistant",
+          content,
+          api: "openai-completions",
+          provider: opts.provider ?? "pagespace",
+          model: opts.modelId ?? "",
+          usage: emptyUsage,
+          stopReason: toolCalls.length > 0 ? "toolUse" : "stop",
+          timestamp: ts,
+        } as AssistantMessage);
+      }
+      for (const tc of toolCalls) {
+        out.push({
+          role: "toolResult",
+          toolCallId: tc.id,
+          toolName: tc.function.name,
+          content: [{ type: "text", text: "(result not stored)" }],
+          isError: false,
+          timestamp: ts,
+        });
+      }
+    }
+  }
+  return out;
+}
+
 /** Build the custom streamSimple bound to a PageSpace config. */
 export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
   const endpoint = `${config.apiUrl.replace(/\/$/, "")}/api/v1/chat/completions`;
