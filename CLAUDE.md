@@ -1,4 +1,4 @@
-# pagespace-cli — PageSpace-native pi companion
+# pagespace-cli — the PageSpace coding harness
 
 ## ⭐ Vision (primary context — read this first)
 **We are building a coding harness that is PageSpace-native** — PageSpace is the substrate (pi's
@@ -7,8 +7,9 @@ PageSpace page `eulvhetfqz8ll6566bwxexar` (drive `pagespace-cli`). It is the nor
 principles, direction — and the **primary per-project injection** (the context engine will inject it
 first; until then, this instruction does).
 
-A **pi package** (soft-fork of `@earendil-works/pi-coding-agent`, MIT) that makes `pi` a native
-companion to PageSpace. Active plan: `~/.claude/plans/get-the-pi-dev-repo-compressed-church.md`.
+The official PageSpace coding harness: deterministic AIDD primitives with PageSpace as the
+filesystem, model brain, memory, and task board. Built as a pi package on top of
+`@earendil-works/pi-coding-agent` (MIT). Active plan: `~/.claude/plans/so-we-ve-proven-the-cuddly-sunset.md`.
 
 ## What it is (two axes, one scoped MCP token)
 

@@ -1,12 +1,12 @@
 /**
- * pagespace-cli — dual-mount adapter (pi extension entry).
+ * pagespace-cli — harness extension entry.
  *
- * Routes pi's own read/write/edit/ls/find/grep by path: anything under the PageSpace mount
- * (`<cwd>/<PAGESPACE_MOUNT>/…`, default `<cwd>/pagespace/…`) operates on PageSpace pages;
- * everything else uses pi's normal local-fs tools. `bash` is left untouched (always local).
+ * Wires PageSpace as the coding harness substrate: routes read/write/edit/ls/find/grep by
+ * path (anything under `<cwd>/<PAGESPACE_MOUNT>/…` maps to PageSpace pages; everything else
+ * uses the local filesystem); registers the PageSpace model brain; mounts deterministic memory
+ * hooks; and loads the AIDD/build tool set. `bash` stays local.
  *
- * Status: the page-backed operations (src/ops.ts) are verified against the live drive
- * (test/run-ops.ts). This entry wires them into pi's tools; needs a pi load to verify end to end.
+ * End-to-end verification requires a running pagespace session.
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -150,7 +150,7 @@ export default function (pi: ExtensionAPI) {
     void modelId;
   }
 
-  // Fan-out / sub-agent primitive (Epic 3): spawn parallel PageSpace-native pi children for
+  // Fan-out / sub-agent primitive (Epic 3): spawn parallel pagespace children for
   // independent sub-tasks. Only registered above the max nesting depth so sub-agents can't recurse.
   if (currentDepth() < MAX_SUBAGENT_DEPTH) {
     registerSubagentTool(pi, {
