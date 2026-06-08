@@ -212,12 +212,29 @@ export default function (pi: ExtensionAPI) {
   // Model brain: register the PageSpace provider — a custom streamSimple over
   // /api/v1/chat/completions (model `ps-agent://<pageId>`) using native function-calling (client-only
   // mode: pi's tools + `disable_server_tools`), keeping pi's tool loop local (src/provider.ts).
-  // Verified end-to-end (test/run-provider.ts). Needs a configured brain page id (PAGESPACE_MODEL_PAGE);
-  // skip cleanly if unset so the file tools still load. Works with any function-calling-capable model.
-  if (config.modelPageId) {
-    const { providerName, modelId } = registerPageSpaceProvider(pi, config);
+  // Verified end-to-end (test/run-provider.ts). Registers when at least one brain page id is configured
+  // (PAGESPACE_MODEL_PAGE and/or PAGESPACE_MODEL_PAGES), enabling quick /model toggling between agents.
+  // Skip cleanly if unset so the file tools still load. Works with any function-calling-capable model.
+  const configuredModelIds = config.modelPageIds ?? [];
+  if (configuredModelIds.length > 0) {
+    const { providerName, modelIds } = registerPageSpaceProvider(pi, config);
     void providerName;
-    void modelId;
+    void modelIds;
+  }
+
+  // Shift+Tab: cycle between configured PageSpace agents. Only registered when multiple
+  // agents are configured so single-model setups keep the default Shift+Tab behavior.
+  if (configuredModelIds.length > 1) {
+    pi.registerShortcut("shift+tab", {
+      description: "Cycle to next PageSpace agent",
+      handler: (ctx) => {
+        const currentId = ctx.model?.id;
+        const idx = currentId !== undefined ? configuredModelIds.indexOf(currentId) : -1;
+        const nextId = configuredModelIds[(idx + 1) % configuredModelIds.length];
+        const nextModel = ctx.modelRegistry.find("pagespace", nextId);
+        if (nextModel) pi.setModel(nextModel);
+      },
+    });
   }
 
   // Fan-out / sub-agent primitive (Epic 3): spawn parallel pagespace children for
@@ -241,7 +258,7 @@ export default function (pi: ExtensionAPI) {
 
   // AIDD requirements step (Epic 3): a deterministically-invokable LLM step that derives
   // schema-validated "Given X, should Y" acceptance criteria via the PageSpace brain.
-  if (config.modelPageId) {
+  if (configuredModelIds.length > 0) {
     registerRequirementsTool(pi, config);
     // Review-as-gate (Epic 3): judge WORK against a RUBRIC; a blocker fails the gate (code-decided).
     registerReviewTool(pi, config);

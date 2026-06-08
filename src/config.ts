@@ -8,8 +8,10 @@ export interface PageSpaceConfig {
   defaultDriveSlug: string | undefined;
   /** Path prefix under cwd that routes to PageSpace pages (default "pagespace"). */
   mountPrefix: string;
-  /** AI_CHAT page id used as pi's model brain: ps-agent://<pageId> (optional until wired). */
+  /** AI_CHAT page id used as pi's model brain: ps-agent://<pageId> (back-compat alias). */
   modelPageId: string | undefined;
+  /** One or more AI_CHAT page ids exposed as models (`pagespace/<id>`) for quick toggling via /model. */
+  modelPageIds?: string[];
   /**
    * Mount sub-paths (within a drive) the dual-mount write/edit refuse — spec immutability for the
    * implementer role. E.g. ["Specs", "Epics"]. From PAGESPACE_READONLY (comma-separated). Optional;
@@ -27,12 +29,21 @@ export interface PageSpaceConfig {
 }
 
 export function loadConfig(): PageSpaceConfig {
+  const configuredPrimary = process.env.PAGESPACE_MODEL_PAGE?.trim();
+  const modelPageIds = (process.env.PAGESPACE_MODEL_PAGES ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const ids = [...new Set([...(configuredPrimary ? [configuredPrimary] : []), ...modelPageIds])];
+  const modelPageId = ids[0];
+
   return {
     apiUrl: process.env.PAGESPACE_API_URL ?? "https://pagespace.ai",
     authToken: process.env.PAGESPACE_AUTH_TOKEN,
     defaultDriveSlug: process.env.PAGESPACE_DRIVE,
     mountPrefix: process.env.PAGESPACE_MOUNT ?? "pagespace",
-    modelPageId: process.env.PAGESPACE_MODEL_PAGE,
+    modelPageId,
+    modelPageIds: ids,
     readOnlyPrefixes: (process.env.PAGESPACE_READONLY ?? "")
       .split(",")
       .map((s) => s.trim())

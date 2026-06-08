@@ -390,31 +390,29 @@ export interface PageSpaceModelSpec {
   maxTokens?: number;
 }
 
-/** Register the PageSpace brain as a pi provider + a single model (the configured agent page). */
+/** Register the PageSpace brain as a pi provider + one or more models (agent pages). */
 export function registerPageSpaceProvider(
   pi: { registerProvider: (name: string, config: any) => void },
   config: PageSpaceConfig,
   spec: PageSpaceModelSpec = {},
-): { providerName: string; modelId: string } {
+): { providerName: string; modelIds: string[] } {
   const providerName = "pagespace";
-  const modelId = config.modelPageId ?? "";
+  const modelIds = config.modelPageIds ?? (config.modelPageId ? [config.modelPageId] : []);
   pi.registerProvider(providerName, {
     name: "PageSpace",
     baseUrl: `${config.apiUrl.replace(/\/$/, "")}/api/v1`,
     apiKey: config.authToken,
     api: "openai-completions",
     streamSimple: createPageSpaceStreamSimple(config),
-    models: [
-      {
-        id: modelId,
-        name: spec.name ?? "PageSpace Brain",
-        reasoning: false,
-        input: ["text"] as ("text" | "image")[],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: spec.contextWindow ?? 200_000,
-        maxTokens: spec.maxTokens ?? 8192,
-      },
-    ],
+    models: modelIds.map((id) => ({
+      id,
+      name: modelIds.length > 1 ? `PageSpace Brain (${id.slice(0, 8)})` : (spec.name ?? "PageSpace Brain"),
+      reasoning: false,
+      input: ["text"] as ("text" | "image")[],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: spec.contextWindow ?? 200_000,
+      maxTokens: spec.maxTokens ?? 8192,
+    })),
   });
-  return { providerName, modelId };
+  return { providerName, modelIds };
 }

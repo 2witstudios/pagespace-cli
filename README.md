@@ -44,6 +44,7 @@ pagespace                    # start a coding session
 pagespace status             # config check + live auth ping
 pagespace sessions           # list synced sessions
 pagespace resume <id>        # continue a session from another machine
+# inside a session: /model   # switch between configured agents/models
 ```
 
 ## Auth & config
@@ -57,7 +58,8 @@ cat > .env.local <<'EOF'
 PAGESPACE_API_URL=https://pagespace.ai
 PAGESPACE_AUTH_TOKEN=mcp_your_scoped_token
 PAGESPACE_DRIVE=pagespace-cli
-PAGESPACE_MODEL_PAGE=your_brain_agent_page_id
+PAGESPACE_MODEL_PAGE=your_primary_brain_agent_page_id
+PAGESPACE_MODEL_PAGES=your_primary_brain_agent_page_id,your_alt_agent_page_id
 EOF
 ```
 
@@ -66,20 +68,22 @@ EOF
 | `PAGESPACE_AUTH_TOKEN` | **yes** | Scoped PageSpace MCP token (Bearer). |
 | `PAGESPACE_API_URL` | no | Instance URL (default `https://pagespace.ai`). |
 | `PAGESPACE_DRIVE` | no | Default drive slug for the mount + memory engine. |
-| `PAGESPACE_MODEL_PAGE` | no | Brain agent page id — registers the `pagespace/<id>` model. |
+| `PAGESPACE_MODEL_PAGE` | no | Primary brain agent page id — also used by session commands (`sessions`/`resume`). |
+| `PAGESPACE_MODEL_PAGES` | no | Comma-separated brain agent ids to register multiple `pagespace/<id>` models for quick `/model` toggling. |
 | `PAGESPACE_READONLY` | no | Comma-separated mount sub-paths the write/edit tools refuse (spec immutability), e.g. `Specs,Epics`. |
 
 ### Brain agent page
 
-`PAGESPACE_MODEL_PAGE` registers a `pagespace/<pageId>` model (named **PageSpace Brain**).
-Select it with `/model` inside a session, or set it as the default once in `~/.pi/agent/settings.json`:
+`PAGESPACE_MODEL_PAGE` (and optionally `PAGESPACE_MODEL_PAGES`) register one or more
+`pagespace/<pageId>` models. Select between them with `/model` inside a session, or set a default
+once in `~/.pi/agent/settings.json`:
 
 ```json
 { "defaultProvider": "pagespace", "defaultModel": "<your brain agent page id>" }
 ```
 
-The model only registers when `PAGESPACE_MODEL_PAGE` is set *and* the extension is loaded — set it
-in `.env.local` and launch via `pagespace`.
+The models register when at least one of `PAGESPACE_MODEL_PAGE` or `PAGESPACE_MODEL_PAGES`
+is set *and* the extension is loaded — set them in `.env.local` and launch via `pagespace`.
 
 ## Skills
 
