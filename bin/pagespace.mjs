@@ -80,36 +80,16 @@ async function statusDoctor() {
   }
 }
 
-// Self-contained skills: pi should load ONLY this package's vendored PageSpace-AIDD skills, never the
-// user-global (~/.agents/skills) set. `--no-skills` disables all auto-discovered + package skills; we
-// then re-add exactly our own with one `--skill <dir>` each. Skipped if the user manages skills via
-// their own flags.
-const skillsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "skills");
-function vendoredSkillFlags() {
-  let entries;
-  try {
-    entries = fs.readdirSync(skillsDir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-  const flags = [];
-  for (const e of entries) {
-    if (e.isDirectory() && fs.existsSync(path.join(skillsDir, e.name, "SKILL.md"))) {
-      flags.push("--skill", path.join(skillsDir, e.name));
-    }
-  }
-  return flags;
-}
-
-// Launch pi with the extension + vendored skills preloaded, then the passthrough args. Reused by the
-// default path and by `resume` (which adds `--session <id>`).
+// Launch pi with the extension preloaded + --no-skills (skills are registered as /name extension
+// commands by the extension itself, so pi's built-in /skill:name registration isn't needed).
 function launchPi(passthrough) {
   const quiet = passthrough.includes("-p") || passthrough.includes("--print") || passthrough.includes("--mode");
   if (!quiet) process.stderr.write("pagespace · the PageSpace coding harness\n");
-  const userManagesSkills =
-    passthrough.includes("--no-skills") || passthrough.includes("-ns") || passthrough.includes("--skill");
-  const skillFlags = userManagesSkills ? [] : ["--no-skills", ...vendoredSkillFlags()];
-  const child = spawn("pi", ["-e", extensionPath, ...skillFlags, ...passthrough], {
+  const noSkillsFlag =
+    passthrough.includes("--no-skills") || passthrough.includes("-ns") || passthrough.includes("--skill")
+      ? []
+      : ["--no-skills"];
+  const child = spawn("pi", ["-e", extensionPath, ...noSkillsFlag, ...passthrough], {
     stdio: "inherit",
     env: { ...process.env, PI_SKIP_VERSION_CHECK: "1" },
   });

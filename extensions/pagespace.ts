@@ -8,6 +8,7 @@
  *
  * End-to-end verification requires a running pagespace session.
  */
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -131,6 +132,69 @@ export default function (pi: ExtensionAPI) {
     });
   }
   // bash: intentionally left as pi's built-in (always local).
+
+  // Register vendored skills as extension commands so they're invoked as /name (not /skill:name).
+  // Each command wraps the skill body in a <skill> block and sends it as a user message, exactly
+  // matching what pi's _expandSkillCommand does for /skill:name — so the LLM experience is identical.
+  const skillsRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "skills");
+  interface SkillEntry {
+    name: string;
+    description: string;
+    body: string;
+    filePath: string;
+    dir: string;
+  }
+  const loadedSkills: SkillEntry[] = [];
+  try {
+    for (const entry of readdirSync(skillsRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const filePath = path.join(skillsRoot, entry.name, "SKILL.md");
+      let raw: string;
+      try {
+        raw = readFileSync(filePath, "utf-8");
+      } catch {
+        continue;
+      }
+      const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+      let skillName = entry.name;
+      let description = "";
+      let body = raw;
+      if (fmMatch) {
+        const fm = fmMatch[1];
+        body = fmMatch[2].trim();
+        const nm = fm.match(/^name:\s*(.+)$/m);
+        if (nm) skillName = nm[1].trim();
+        const dm = fm.match(/^description:\s*(.+)$/m);
+        if (dm) description = dm[1].trim();
+      }
+      if (!description) continue;
+      loadedSkills.push({
+        name: skillName,
+        description,
+        body,
+        filePath,
+        dir: path.join(skillsRoot, entry.name),
+      });
+      pi.registerCommand(skillName, {
+        description,
+        handler: async (args) => {
+          const block = `<skill name="${skillName}" location="${filePath}">\nReferences are relative to ${path.join(skillsRoot, entry.name)}.\n\n${body}\n</skill>`;
+          pi.sendUserMessage(args ? `${block}\n\n${args}` : block);
+        },
+      });
+    }
+  } catch {
+    /* skills dir missing — safe to skip */
+  }
+
+  // Inject skills list into system prompt so the model knows /name commands exist.
+  if (loadedSkills.length > 0) {
+    const skillsSection = `\n\n## Available skills\n\nInvoke with /name to load specialized instructions into the current turn.\n\n${loadedSkills.map((s) => `- \`/${s.name}\` — ${s.description}`).join("\n")}`;
+    pi.on("before_agent_start", (event) => {
+      if (event.systemPrompt.includes("Available skills")) return undefined;
+      return { systemPrompt: event.systemPrompt + skillsSection };
+    });
+  }
 
   // Connectivity smoke tool.
   pi.registerTool({
