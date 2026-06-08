@@ -261,10 +261,20 @@ export default function (pi: ExtensionAPI) {
     });
   }
 
-  // Override pi's built-in TUI header in interactive mode. The window title is handled natively
-  // by pi via PI_PACKAGE_DIR (bin/pagespace.mjs points pi at our package.json so APP_TITLE = "pagespace").
+  // Override pi's TUI header and terminal window title when running interactively.
+  // setTitle is deferred via setImmediate so it runs after pi's own updateTerminalTitle()
+  // (which fires synchronously after the session_start handlers complete), preventing it
+  // from overwriting our title with "π - sessionName - cwd".
   pi.on("session_start", async (_event, ctx) => {
     if ((ctx as any).mode !== "tui") return;
+    setImmediate(() => {
+      const sm = (ctx as any).sessionManager;
+      const sessionName = sm?.getSessionName?.() as string | undefined;
+      const cwdBase = path.basename((sm?.getCwd?.() as string | undefined) ?? cwd);
+      (ctx as any).ui?.setTitle?.(
+        sessionName ? `pagespace - ${sessionName} - ${cwdBase}` : `pagespace - ${cwdBase}`,
+      );
+    });
     (ctx as any).ui?.setHeader?.((_tui: unknown, theme: any) => ({
       render(_width: number): string[] {
         return [
