@@ -17,6 +17,13 @@ export interface PageSpaceConfig {
    * always sets it (possibly `[]`); hand-built configs may omit it.
    */
   readOnlyPrefixes?: string[];
+  /**
+   * Stable ID for this session's conversation in PageSpace. When set, every completions request
+   * carries `conversation_id` + `client_manages_history: true` so messages are persisted under a
+   * single conversation without the server overwriting pi's full context.
+   * Injected at session start (not from env) — omit in `loadConfig`.
+   */
+  conversationId?: string;
 }
 
 export function loadConfig(): PageSpaceConfig {

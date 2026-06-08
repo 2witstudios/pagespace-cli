@@ -214,6 +214,10 @@ export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
           messages,
           disable_server_tools: true,
         };
+        if (config.conversationId) {
+          body.conversation_id = config.conversationId;
+          body.client_manages_history = true;
+        }
         const tools = convertTools(context.tools ?? []);
         if (tools.length > 0) body.tools = tools;
 
