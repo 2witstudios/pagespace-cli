@@ -10,6 +10,9 @@
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+const _require = createRequire(import.meta.url);
+const { version } = _require("../package.json") as { version: string };
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   createReadTool,
@@ -257,4 +260,19 @@ export default function (pi: ExtensionAPI) {
       await syncSession(ctx, true); // final snapshot — full re-render
     });
   }
+
+  // Override pi's built-in TUI header + terminal window title when running in interactive mode.
+  pi.on("session_start", async (_event, ctx) => {
+    if ((ctx as any).mode !== "tui") return;
+    (ctx as any).ui?.setTitle?.("pagespace");
+    (ctx as any).ui?.setHeader?.((_tui: unknown, theme: any) => ({
+      render(_width: number): string[] {
+        return [
+          theme.bold(theme.fg("accent", "pagespace")) + theme.fg("dim", ` v${version}`),
+          theme.fg("muted", "the PageSpace coding harness"),
+        ];
+      },
+      invalidate() {},
+    }));
+  });
 }
