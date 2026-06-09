@@ -53,11 +53,13 @@ async function main(): Promise<void> {
       request: "first task",
       summary: "done one",
       toolCalls: 2,
+      files: [],
     });
     const e2 = formatSessionEntry("2026-06-04 00:01", {
       request: "second task",
       summary: "done two",
       toolCalls: 0,
+      files: [],
     });
     const a1 = await appendToPage(api, resolver, drive, "_persisttest", e1);
     const a2 = await appendToPage(api, resolver, drive, "_persisttest", e2);
