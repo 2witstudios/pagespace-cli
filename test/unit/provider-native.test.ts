@@ -139,7 +139,32 @@ test("convertTools: empty → empty", () => {
   assert.deepEqual(convertTools([]), []);
 });
 
-test("registerPageSpaceProvider: registers one model per configured agent id", () => {
+test("registerPageSpaceProvider: pi model id is display name when config.models is set", () => {
+  const calls: any[] = [];
+  const pi = { registerProvider: (_name: string, cfg: any) => calls.push(cfg) };
+  const config = {
+    apiUrl: "https://pagespace.ai",
+    authToken: "mcp_x",
+    defaultDriveSlug: "pagespace-cli",
+    mountPrefix: "pagespace",
+    modelPageId: "agent_a",
+    modelPageIds: ["agent_a", "agent_b"],
+    models: [
+      { id: "agent_a", name: "Agent Alpha" },
+      { id: "agent_b", name: "Agent Beta" },
+    ],
+  };
+
+  const out = registerPageSpaceProvider(pi as any, config as any);
+  assert.deepEqual(out.modelIds, ["Agent Alpha", "Agent Beta"]);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(
+    calls[0].models.map((m: any) => m.id),
+    ["Agent Alpha", "Agent Beta"],
+  );
+});
+
+test("registerPageSpaceProvider: falls back to generated names when config.models is absent", () => {
   const calls: any[] = [];
   const pi = { registerProvider: (_name: string, cfg: any) => calls.push(cfg) };
   const config = {
@@ -152,10 +177,9 @@ test("registerPageSpaceProvider: registers one model per configured agent id", (
   };
 
   const out = registerPageSpaceProvider(pi as any, config as any);
-  assert.deepEqual(out.modelIds, ["agent_a", "agent_b"]);
-  assert.equal(calls.length, 1);
+  assert.deepEqual(out.modelIds, ["PageSpace Brain (agent_a)", "PageSpace Brain (agent_b)"]);
   assert.deepEqual(
     calls[0].models.map((m: any) => m.id),
-    ["agent_a", "agent_b"],
+    ["PageSpace Brain (agent_a)", "PageSpace Brain (agent_b)"],
   );
 });
