@@ -109,13 +109,18 @@ export interface ConvMessage {
   role: string;
   content: string | null;
   tool_calls?: { id: string; type: string; function: { name: string; arguments: string } }[];
+  /** Present on role:"tool" messages returned by the back-fill path (PR #1572). */
+  tool_call_id?: string;
   created_at: number;
 }
 
 /**
  * Convert stored OpenAI messages (from GET /api/v1/conversations/:id) back to pi Message[].
- * Tool results are not stored server-side so we emit a placeholder to keep pi's structure valid.
- * Pure, no side effects.
+ *
+ * The endpoint now returns interleaved role:"tool" messages for stored results (backend PR #1572).
+ * When they are present they are used as-is. When they are absent (messages stored before the back-fill
+ * landed, or a turn whose back-fill hasn't run yet) we emit "(result not stored)" placeholders so
+ * pi's history stays structurally valid. Pure, no side effects.
  */
 export function fromConversationMessages(
   messages: ConvMessage[],
@@ -130,11 +135,44 @@ export function fromConversationMessages(
     totalTokens: 0,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
   };
+
+  // After an assistant message with tool_calls, track which call IDs still need a result.
+  // Flushed as placeholders when we reach a message that isn't role:"tool".
+  interface PendingCall {
+    id: string;
+    name: string;
+    ts: number;
+  }
+  const pending: PendingCall[] = [];
+  const covered = new Set<string>();
+  // tool_call_id → tool name, populated from the preceding assistant's tool_calls
+  const nameMap = new Map<string, string>();
+
+  const flushPending = () => {
+    for (const p of pending) {
+      if (!covered.has(p.id)) {
+        out.push({
+          role: "toolResult",
+          toolCallId: p.id,
+          toolName: p.name,
+          content: [{ type: "text", text: "(result not stored)" }],
+          isError: false,
+          timestamp: p.ts,
+        });
+      }
+    }
+    pending.length = 0;
+    covered.clear();
+  };
+
   for (const m of messages) {
     const ts = m.created_at * 1000;
+
     if (m.role === "user") {
+      flushPending();
       out.push({ role: "user", content: [{ type: "text", text: m.content ?? "" }], timestamp: ts });
     } else if (m.role === "assistant") {
+      flushPending();
       const content: (TextContent | ToolCall)[] = [];
       if (m.content) content.push({ type: "text", text: m.content });
       const toolCalls = m.tool_calls ?? [];
@@ -146,6 +184,8 @@ export function fromConversationMessages(
           // keep empty args on malformed JSON
         }
         content.push({ type: "toolCall", id: tc.id, name: tc.function.name, arguments: args });
+        pending.push({ id: tc.id, name: tc.function.name, ts });
+        nameMap.set(tc.id, tc.function.name);
       }
       if (content.length > 0) {
         out.push({
@@ -159,18 +199,20 @@ export function fromConversationMessages(
           timestamp: ts,
         } as AssistantMessage);
       }
-      for (const tc of toolCalls) {
-        out.push({
-          role: "toolResult",
-          toolCallId: tc.id,
-          toolName: tc.function.name,
-          content: [{ type: "text", text: "(result not stored)" }],
-          isError: false,
-          timestamp: ts,
-        });
-      }
+    } else if (m.role === "tool") {
+      const toolCallId = m.tool_call_id ?? "";
+      covered.add(toolCallId);
+      out.push({
+        role: "toolResult",
+        toolCallId,
+        toolName: nameMap.get(toolCallId) ?? "",
+        content: [{ type: "text", text: m.content ?? "" }],
+        isError: false,
+        timestamp: ts,
+      });
     }
   }
+  flushPending();
   return out;
 }
 
