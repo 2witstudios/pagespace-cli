@@ -17,7 +17,7 @@ test("toOpenAIMessages: assistant text only → role:assistant content", () => {
   ]);
 });
 
-test("toOpenAIMessages: assistant tool call → tool_calls with stringified args", () => {
+test("toOpenAIMessages: assistant tool call → tool_calls with stringified args + annotation content", () => {
   const out = msgs([
     {
       role: "assistant",
@@ -25,9 +25,25 @@ test("toOpenAIMessages: assistant tool call → tool_calls with stringified args
     },
   ]);
   assert.equal(out[0].role, "assistant");
+  assert.equal(out[0].content, "[read]");
   assert.deepEqual(out[0].tool_calls, [
     { id: "c1", type: "function", function: { name: "read", arguments: '{"path":"x.ts"}' } },
   ]);
+});
+
+test("toOpenAIMessages: tool-call-only with multiple distinct names → deduped annotation", () => {
+  const out = msgs([
+    {
+      role: "assistant",
+      content: [
+        { type: "toolCall", id: "c1", name: "read", arguments: {} },
+        { type: "toolCall", id: "c2", name: "edit", arguments: {} },
+        { type: "toolCall", id: "c3", name: "read", arguments: {} },
+      ],
+    },
+  ]);
+  assert.equal(out[0].content, "[read, edit]");
+  assert.equal(out[0].tool_calls?.length, 3);
 });
 
 test("toOpenAIMessages: assistant text + parallel tool calls", () => {

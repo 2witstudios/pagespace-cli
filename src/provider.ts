@@ -83,6 +83,10 @@ export function toOpenAIMessages(messages: Message[]): OpenAIMessage[] {
         // thinking blocks are dropped — not replayed to the model
       }
       text = text.trim();
+      if (!text && toolCalls.length > 0) {
+        const names = [...new Set(toolCalls.map((tc) => tc.function.name))];
+        text = `[${names.join(", ")}]`;
+      }
       const msg: OpenAIMessage = { role: "assistant" };
       if (text) msg.content = text;
       if (toolCalls.length) msg.tool_calls = toolCalls;
