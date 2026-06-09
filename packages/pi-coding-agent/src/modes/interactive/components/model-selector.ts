@@ -148,7 +148,11 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 		// Load available models (built-in models still work even if models.json failed)
 		try {
-			const availableModels = await this.modelRegistry.getAvailable();
+			const allAvailable = await this.modelRegistry.getAvailable();
+			const allowedProviders = this.settingsManager.getAllowedProviders();
+			const availableModels = allowedProviders?.length
+				? allAvailable.filter((m: Model<any>) => allowedProviders.includes(m.provider))
+				: allAvailable;
 			models = availableModels.map((model: Model<any>) => ({
 				provider: model.provider,
 				id: model.id,

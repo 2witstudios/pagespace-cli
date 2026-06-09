@@ -103,6 +103,12 @@ function ensurePagespaceAgentDir() {
   if (!fs.existsSync(keybindingsPath)) {
     fs.writeFileSync(keybindingsPath, JSON.stringify({ "app.thinking.cycle": [] }, null, 2) + "\n");
   }
+  // Lock the model picker to the pagespace provider so no other provider's models appear.
+  const settingsPath = path.join(PAGESPACE_AGENT_DIR, "settings.json");
+  const existing = fs.existsSync(settingsPath) ? JSON.parse(fs.readFileSync(settingsPath, "utf8")) : {};
+  if (!existing.allowedProviders || existing.allowedProviders.join(",") !== "pagespace") {
+    fs.writeFileSync(settingsPath, JSON.stringify({ ...existing, allowedProviders: ["pagespace"] }, null, 2) + "\n");
+  }
 }
 
 function launchPi(passthrough) {
