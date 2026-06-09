@@ -222,10 +222,12 @@ export default function (pi: ExtensionAPI) {
     void modelIds;
   }
 
-  // Shift+Tab: cycle between configured PageSpace agents. Only registered when multiple
-  // agents are configured so single-model setups keep the default Shift+Tab behavior.
+  // Ctrl+Shift+A: cycle between configured PageSpace agents. Shift+Tab is reserved by pi
+  // for thinking-level cycling (RESERVED_KEYBINDINGS_FOR_EXTENSION_CONFLICTS) and cannot
+  // be overridden by extensions — it silently skips the registration and pi fires thinking
+  // cycle instead. Ctrl+Shift+A is unused in pi's built-in keybinding set.
   if (configuredModelIds.length > 1) {
-    pi.registerShortcut("shift+tab", {
+    pi.registerShortcut("ctrl+shift+a", {
       description: "Cycle to next PageSpace agent",
       handler: (ctx) => {
         const currentId = ctx.model?.id;
