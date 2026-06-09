@@ -42,7 +42,7 @@ import { registerTaskCompleteTool } from "../src/complete.ts";
 import { registerBuildTool } from "../src/build.ts";
 import { registerPageSpaceProvider } from "../src/provider.ts";
 
-export default function (pi: ExtensionAPI) {
+export default async function (pi: ExtensionAPI) {
   // Override the process title that pi sets (process.title = "pi") so terminal apps like iTerm2
   // show "pagespace" instead of "pi" in the process-name portion of the title bar.
   process.title = "pagespace";
@@ -51,6 +51,31 @@ export default function (pi: ExtensionAPI) {
   loadDotenv(path.dirname(fileURLToPath(import.meta.url)));
   const config = loadConfig();
   config.conversationId = globalThis.crypto.randomUUID();
+
+  // Auto-discover agent models from GET /api/v1/models when PAGESPACE_MODEL_PAGES is not explicitly
+  // set. This keeps .env.local minimal — add a new AI_CHAT page to the drive and it appears in
+  // /model and Shift+Tab without any manual ID management.
+  if (!process.env.PAGESPACE_MODEL_PAGES?.trim() && config.authToken) {
+    try {
+      const res = await fetch(`${config.apiUrl}/api/v1/models`, {
+        headers: { authorization: `Bearer ${config.authToken}` },
+      });
+      if (res.ok) {
+        const payload = (await res.json()) as { data?: { id: string; name?: string }[] };
+        const discovered = (payload.data ?? [])
+          .map((m) => m.id.replace(/^ps-agent:\/\//, ""))
+          .filter(Boolean);
+        if (discovered.length > 0) {
+          const primary = config.modelPageId;
+          const rest = discovered.filter((id) => id !== primary);
+          config.modelPageIds = primary ? [primary, ...rest] : discovered;
+          config.modelPageId = config.modelPageIds[0];
+        }
+      }
+    } catch {
+      // discovery must never break the session
+    }
+  }
   const api = new PageSpaceApi(config);
   const resolver = new PageSpaceResolver(api);
   const cwd = process.cwd();
