@@ -58,6 +58,28 @@ export interface OpenAITool {
   function: { name: string; description: string; parameters: unknown };
 }
 
+/** Extract the most informative single argument from a tool call for annotation purposes. */
+function primaryArg(name: string, args: Record<string, unknown>): string {
+  const s = (v: unknown) => (typeof v === "string" ? v : "");
+  switch (name) {
+    case "read":
+    case "find":
+    case "ls":
+      return s(args.path);
+    case "write":
+    case "edit":
+      return s(args.file_path);
+    case "grep":
+      return s(args.pattern) || s(args.path);
+    case "bash": {
+      const cmd = s(args.command);
+      return cmd.length > 40 ? `${cmd.slice(0, 37)}…` : cmd;
+    }
+    default:
+      return "";
+  }
+}
+
 /**
  * Convert pi's message history into OpenAI-native chat messages for the v1 client-tools mode:
  * assistant turns carry `tool_calls` (arguments stringified), tool results become `role:"tool"`
@@ -83,6 +105,19 @@ export function toOpenAIMessages(messages: Message[]): OpenAIMessage[] {
         // thinking blocks are dropped — not replayed to the model
       }
       text = text.trim();
+      if (!text && toolCalls.length > 0) {
+        // Tool-call-only step: annotate with tool names + primary arg so the message is visible
+        // in the PageSpace conversation history instead of storing content:null (blank entry).
+        const entries = toolCalls.map((tc) => {
+          let args: Record<string, unknown> = {};
+          try {
+            args = JSON.parse(tc.function.arguments);
+          } catch {}
+          const key = primaryArg(tc.function.name, args);
+          return key ? `${tc.function.name}: ${key}` : tc.function.name;
+        });
+        text = `[${[...new Set(entries)].join(", ")}]`;
+      }
       const msg: OpenAIMessage = { role: "assistant" };
       if (text) msg.content = text;
       if (toolCalls.length) msg.tool_calls = toolCalls;
