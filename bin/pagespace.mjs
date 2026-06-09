@@ -7,6 +7,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+// Resolve the pi CLI from the local workspace package rather than a global install.
+// Using a path-relative URL since dist/cli.js isn't in the package's exports map.
+const PI_CLI = fileURLToPath(
+  new URL("../node_modules/@earendil-works/pi-coding-agent/dist/cli.js", import.meta.url),
+);
 /** Reproduce pi's cwd → session-dir name: `--<cwd without leading slash, / \\ : → ->--`. */
 const encodeCwdDir = (cwd) => `--${cwd.replace(/^[\/\\]/, "").replace(/[\/\\:]/g, "-")}--`;
 
@@ -107,14 +113,12 @@ function launchPi(passthrough) {
     passthrough.includes("--no-skills") || passthrough.includes("-ns") || passthrough.includes("--skill")
       ? []
       : ["--no-skills"];
-  const child = spawn("pi", ["-e", extensionPath, ...noSkillsFlag, ...passthrough], {
+  const child = spawn(process.execPath, [PI_CLI, "-e", extensionPath, ...noSkillsFlag, ...passthrough], {
     stdio: "inherit",
     env: { ...process.env, PI_SKIP_VERSION_CHECK: "1", PI_CODING_AGENT_DIR: PAGESPACE_AGENT_DIR },
   });
   child.on("error", (err) => {
-    console.error(
-      `pagespace: failed to launch pi (${err.message}). Is pi installed?  npm i -g @earendil-works/pi-coding-agent`,
-    );
+    console.error(`pagespace: failed to launch (${err.message}).`);
     process.exit(127);
   });
   child.on("exit", (code, signal) => {

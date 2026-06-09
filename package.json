@@ -3,9 +3,11 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "description": "The PageSpace coding harness — deterministic AIDD primitives with PageSpace as the filesystem, model brain, memory, and task board.",
   "keywords": [
-    "pi-package",
     "pagespace",
     "coding-harness",
     "aidd"
@@ -18,18 +20,8 @@
   "bugs": {
     "url": "https://github.com/2witstudios/pagespace-cli/issues"
   },
-  "pi": {
-    "extensions": [
-      "./extensions"
-    ],
-    "skills": [
-      "./skills"
-    ],
-    "prompts": [
-      "./prompts"
-    ]
-  },
   "scripts": {
+    "build": "npm run build -w packages/pi-tui -w packages/pi-ai -w packages/pi-agent-core -w packages/pi-coding-agent",
     "typecheck": "tsc --noEmit -p .",
     "lint": "biome check src extensions test",
     "format": "biome format --write src extensions test",
@@ -38,15 +30,11 @@
     "check": "npm run typecheck && npm run lint && npm run test",
     "prepare": "husky"
   },
-  "peerDependencies": {
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "typebox": "*"
-  },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
-    "@earendil-works/pi-ai": "^0.74.2",
-    "@earendil-works/pi-coding-agent": "^0.74.2",
+    "@earendil-works/pi-ai": "workspace:*",
+    "@earendil-works/pi-coding-agent": "workspace:*",
+    "@typescript/native-preview": "7.0.0-dev.20260120.1",
     "husky": "^9.1.7",
     "tsx": "^4.19.2",
     "typebox": "^1.1.39",
@@ -61,6 +49,7 @@
     "skills",
     "prompts",
     "bin",
+    "packages",
     "README.md"
   ]
 }
