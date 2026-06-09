@@ -12,6 +12,8 @@ export interface PageSpaceConfig {
   modelPageId: string | undefined;
   /** One or more AI_CHAT page ids exposed as models (`pagespace/<id>`) for quick toggling via /model. */
   modelPageIds?: string[];
+  /** Richer model specs with display names — populated by auto-discovery, takes precedence over modelPageIds in the provider. */
+  models?: { id: string; name: string }[];
   /**
    * Mount sub-paths (within a drive) the dual-mount write/edit refuse — spec immutability for the
    * implementer role. E.g. ["Specs", "Epics"]. From PAGESPACE_READONLY (comma-separated). Optional;

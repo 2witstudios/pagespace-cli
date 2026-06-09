@@ -63,12 +63,16 @@ export default async function (pi: ExtensionAPI) {
       if (res.ok) {
         const payload = (await res.json()) as { data?: { id: string; name?: string }[] };
         const discovered = (payload.data ?? [])
-          .map((m) => m.id.replace(/^ps-agent:\/\//, ""))
-          .filter(Boolean);
+          .map((m) => ({ id: m.id.replace(/^ps-agent:\/\//, ""), name: m.name ?? m.id }))
+          .filter((m) => m.id);
         if (discovered.length > 0) {
           const primary = config.modelPageId;
-          const rest = discovered.filter((id) => id !== primary);
-          config.modelPageIds = primary ? [primary, ...rest] : discovered;
+          const rest = discovered.filter((m) => m.id !== primary);
+          const primarySpec = discovered.find((m) => m.id === primary);
+          config.models = primary
+            ? [primarySpec ?? { id: primary, name: "PageSpace Brain" }, ...rest]
+            : discovered;
+          config.modelPageIds = config.models.map((m) => m.id);
           config.modelPageId = config.modelPageIds[0];
         }
       }
