@@ -65,8 +65,7 @@ export default async function (pi: ExtensionAPI) {
         config.models = primary
           ? [primarySpec ?? { id: primary, name: "PageSpace Brain" }, ...rest]
           : discovered;
-        config.modelPageIds = config.models.map((m) => m.id);
-        config.modelPageId = config.modelPageIds[0];
+        config.modelPageId = config.models[0]?.id;
       }
     } catch {
       // discovery must never break the session
@@ -235,9 +234,7 @@ export default async function (pi: ExtensionAPI) {
   // Verified end-to-end (test/run-provider.ts). Registers when at least one brain page id is configured
   // (PAGESPACE_MODEL_PAGE and/or PAGESPACE_MODEL_PAGES), enabling quick /model toggling between agents.
   // Skip cleanly if unset so the file tools still load. Works with any function-calling-capable model.
-  const configuredModelIds = config.models
-    ? config.models.map((m) => m.name ?? m.id)
-    : (config.modelPageIds ?? []);
+  const configuredModelIds = (config.models ?? []).map((m) => m.name ?? m.id);
   if (configuredModelIds.length > 0) {
     const { providerName, modelIds } = registerPageSpaceProvider(pi, config);
     void providerName;

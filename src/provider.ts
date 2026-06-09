@@ -477,12 +477,7 @@ export function registerPageSpaceProvider(
   spec: PageSpaceModelSpec = {},
 ): { providerName: string; modelIds: string[] } {
   const providerName = "pagespace";
-  const modelSpecs =
-    config.models ??
-    (config.modelPageIds ?? (config.modelPageId ? [config.modelPageId] : [])).map((id) => ({
-      id,
-      name: undefined,
-    }));
+  const modelSpecs = config.models ?? (config.modelPageId ? [{ id: config.modelPageId }] : []);
   // pi model id = display name (shown in footer, /model list, Shift+Tab).
   // The PageSpace page id is an API routing detail resolved inside streamSimple.
   const piId = (m: { id: string; name?: string }) =>

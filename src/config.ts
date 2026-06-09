@@ -10,10 +10,8 @@ export interface PageSpaceConfig {
   mountPrefix: string;
   /** AI_CHAT page id used as pi's model brain: ps-agent://<pageId> (back-compat alias). */
   modelPageId: string | undefined;
-  /** One or more AI_CHAT page ids exposed as models (`pagespace/<id>`) for quick toggling via /model. */
-  modelPageIds?: string[];
-  /** Richer model specs with display names — populated by auto-discovery, takes precedence over modelPageIds in the provider. */
-  models?: { id: string; name: string }[];
+  /** Model specs — populated by PAGESPACE_MODEL_PAGE/PAGESPACE_MODEL_PAGES env or auto-discovery. */
+  models?: { id: string; name?: string }[];
   /**
    * Mount sub-paths (within a drive) the dual-mount write/edit refuse — spec immutability for the
    * implementer role. E.g. ["Specs", "Epics"]. From PAGESPACE_READONLY (comma-separated). Optional;
@@ -45,7 +43,7 @@ export function loadConfig(): PageSpaceConfig {
     defaultDriveSlug: process.env.PAGESPACE_DRIVE,
     mountPrefix: process.env.PAGESPACE_MOUNT ?? "pagespace",
     modelPageId,
-    modelPageIds: ids,
+    models: ids.length > 0 ? ids.map((id) => ({ id })) : undefined,
     readOnlyPrefixes: (process.env.PAGESPACE_READONLY ?? "")
       .split(",")
       .map((s) => s.trim())
