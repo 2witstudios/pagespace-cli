@@ -83,7 +83,24 @@ async function statusDoctor() {
 
 // Launch pi with the extension preloaded + --no-skills (skills are registered as /name extension
 // commands by the extension itself, so pi's built-in /skill:name registration isn't needed).
+// Pagespace's own pi agent directory — separate from ~/.pi/agent/ so pagespace can own its
+// keybindings without touching the user's global pi config.
+const PAGESPACE_AGENT_DIR = path.join(os.homedir(), ".pagespace", "agent");
+function ensurePagespaceAgentDir() {
+  if (!fs.existsSync(PAGESPACE_AGENT_DIR)) {
+    fs.mkdirSync(PAGESPACE_AGENT_DIR, { recursive: true });
+  }
+  const keybindingsPath = path.join(PAGESPACE_AGENT_DIR, "keybindings.json");
+  // Unbind app.thinking.cycle from shift+tab so pagespace can claim shift+tab for
+  // agent cycling. pi's RESERVED list blocks extension overrides — the only escape
+  // hatch is clearing the binding via the user keybindings config before pi starts.
+  if (!fs.existsSync(keybindingsPath)) {
+    fs.writeFileSync(keybindingsPath, JSON.stringify({ "app.thinking.cycle": [] }, null, 2) + "\n");
+  }
+}
+
 function launchPi(passthrough) {
+  ensurePagespaceAgentDir();
   const quiet = passthrough.includes("-p") || passthrough.includes("--print") || passthrough.includes("--mode");
   if (!quiet) process.stderr.write("pagespace · the PageSpace coding harness\n");
   const noSkillsFlag =
@@ -92,7 +109,7 @@ function launchPi(passthrough) {
       : ["--no-skills"];
   const child = spawn("pi", ["-e", extensionPath, ...noSkillsFlag, ...passthrough], {
     stdio: "inherit",
-    env: { ...process.env, PI_SKIP_VERSION_CHECK: "1" },
+    env: { ...process.env, PI_SKIP_VERSION_CHECK: "1", PI_CODING_AGENT_DIR: PAGESPACE_AGENT_DIR },
   });
   child.on("error", (err) => {
     console.error(
