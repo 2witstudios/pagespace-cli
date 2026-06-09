@@ -201,6 +201,7 @@ export function fromConversationMessages(
       }
     } else if (m.role === "tool") {
       const toolCallId = m.tool_call_id ?? "";
+      if (!nameMap.has(toolCallId)) continue; // orphan — no preceding assistant registered this id
       covered.add(toolCallId);
       out.push({
         role: "toolResult",

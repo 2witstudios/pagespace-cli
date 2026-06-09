@@ -150,6 +150,16 @@ describe("fromConversationMessages", () => {
     assert.equal((out[0] as any).model, "mymodel");
   });
 
+  it("orphan role:tool message (no preceding assistant) is silently skipped", () => {
+    const input: ConvMessage[] = [
+      { id: "t1", role: "tool", content: "orphan result", tool_call_id: "tc-orphan", created_at: 1_000 },
+      { id: "m1", role: "user", content: "hello", created_at: 2_000 },
+    ];
+    const out = fromConversationMessages(input);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].role, "user");
+  });
+
   it("malformed tool_calls arguments fall back to empty object", () => {
     const input: ConvMessage[] = [
       {
