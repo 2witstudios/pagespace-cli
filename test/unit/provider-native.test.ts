@@ -17,7 +17,7 @@ test("toOpenAIMessages: assistant text only → role:assistant content", () => {
   ]);
 });
 
-test("toOpenAIMessages: assistant tool call → tool_calls with stringified args", () => {
+test("toOpenAIMessages: assistant tool call → tool_calls with stringified args + rich annotation", () => {
   const out = msgs([
     {
       role: "assistant",
@@ -25,9 +25,58 @@ test("toOpenAIMessages: assistant tool call → tool_calls with stringified args
     },
   ]);
   assert.equal(out[0].role, "assistant");
+  assert.equal(out[0].content, "[read: x.ts]");
   assert.deepEqual(out[0].tool_calls, [
     { id: "c1", type: "function", function: { name: "read", arguments: '{"path":"x.ts"}' } },
   ]);
+});
+
+test("toOpenAIMessages: tool-call-only — edit uses file_path arg", () => {
+  const out = msgs([
+    {
+      role: "assistant",
+      content: [{ type: "toolCall", id: "c1", name: "edit", arguments: { file_path: "src/foo.ts" } }],
+    },
+  ]);
+  assert.equal(out[0].content, "[edit: src/foo.ts]");
+});
+
+test("toOpenAIMessages: tool-call-only — bash truncates long commands", () => {
+  const cmd = "npm run typecheck && npm run lint && npm test";
+  const out = msgs([
+    {
+      role: "assistant",
+      content: [{ type: "toolCall", id: "c1", name: "bash", arguments: { command: cmd } }],
+    },
+  ]);
+  assert.ok(out[0].content?.startsWith("[bash: "));
+  assert.ok(out[0].content?.endsWith("…]"));
+  assert.ok((out[0].content?.length ?? 0) <= 50);
+});
+
+test("toOpenAIMessages: tool-call-only — multiple calls deduplicated by name+arg", () => {
+  const out = msgs([
+    {
+      role: "assistant",
+      content: [
+        { type: "toolCall", id: "c1", name: "read", arguments: { path: "a.ts" } },
+        { type: "toolCall", id: "c2", name: "edit", arguments: { file_path: "b.ts" } },
+        { type: "toolCall", id: "c3", name: "read", arguments: { path: "a.ts" } },
+      ],
+    },
+  ]);
+  assert.equal(out[0].content, "[read: a.ts, edit: b.ts]");
+  assert.equal(out[0].tool_calls?.length, 3);
+});
+
+test("toOpenAIMessages: tool-call-only — unknown tool with no primary arg falls back to name only", () => {
+  const out = msgs([
+    {
+      role: "assistant",
+      content: [{ type: "toolCall", id: "c1", name: "pagespace_status", arguments: {} }],
+    },
+  ]);
+  assert.equal(out[0].content, "[pagespace_status]");
 });
 
 test("toOpenAIMessages: assistant text + parallel tool calls", () => {
