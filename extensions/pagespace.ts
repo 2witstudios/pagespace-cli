@@ -51,36 +51,27 @@ export default async function (pi: ExtensionAPI) {
   loadDotenv(path.dirname(fileURLToPath(import.meta.url)));
   const config = loadConfig();
   config.conversationId = globalThis.crypto.randomUUID();
+  const api = new PageSpaceApi(config);
 
-  // Auto-discover agent models from GET /api/v1/models when PAGESPACE_MODEL_PAGES is not explicitly
-  // set. This keeps .env.local minimal — add a new AI_CHAT page to the drive and it appears in
-  // /model and Shift+Tab without any manual ID management.
-  if (!process.env.PAGESPACE_MODEL_PAGES?.trim() && config.authToken) {
+  // Auto-discover agents from the page tree when PAGESPACE_MODEL_PAGES is not explicitly set.
+  // Uses AI_CHAT page titles as display names — accurate, no dependence on /api/v1/models name field.
+  if (!process.env.PAGESPACE_MODEL_PAGES?.trim() && config.defaultDriveSlug) {
     try {
-      const res = await fetch(`${config.apiUrl}/api/v1/models`, {
-        headers: { authorization: `Bearer ${config.authToken}` },
-      });
-      if (res.ok) {
-        const payload = (await res.json()) as { data?: { id: string; name?: string }[] };
-        const discovered = (payload.data ?? [])
-          .map((m) => ({ id: m.id.replace(/^ps-agent:\/\//, ""), name: m.name ?? m.id }))
-          .filter((m) => m.id);
-        if (discovered.length > 0) {
-          const primary = config.modelPageId;
-          const rest = discovered.filter((m) => m.id !== primary);
-          const primarySpec = discovered.find((m) => m.id === primary);
-          config.models = primary
-            ? [primarySpec ?? { id: primary, name: "PageSpace Brain" }, ...rest]
-            : discovered;
-          config.modelPageIds = config.models.map((m) => m.id);
-          config.modelPageId = config.modelPageIds[0];
-        }
+      const discovered = await api.listAgentsByDriveSlug(config.defaultDriveSlug);
+      if (discovered.length > 0) {
+        const primary = config.modelPageId;
+        const rest = discovered.filter((m) => m.id !== primary);
+        const primarySpec = discovered.find((m) => m.id === primary);
+        config.models = primary
+          ? [primarySpec ?? { id: primary, name: "PageSpace Brain" }, ...rest]
+          : discovered;
+        config.modelPageIds = config.models.map((m) => m.id);
+        config.modelPageId = config.modelPageIds[0];
       }
     } catch {
       // discovery must never break the session
     }
   }
-  const api = new PageSpaceApi(config);
   const resolver = new PageSpaceResolver(api);
   const cwd = process.cwd();
   const mountRoot = path.resolve(cwd, config.mountPrefix);
