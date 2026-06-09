@@ -148,7 +148,6 @@ test("registerPageSpaceProvider: pi model id is display name when config.models 
     defaultDriveSlug: "pagespace-cli",
     mountPrefix: "pagespace",
     modelPageId: "agent_a",
-    modelPageIds: ["agent_a", "agent_b"],
     models: [
       { id: "agent_a", name: "Agent Alpha" },
       { id: "agent_b", name: "Agent Beta" },
@@ -164,7 +163,7 @@ test("registerPageSpaceProvider: pi model id is display name when config.models 
   );
 });
 
-test("registerPageSpaceProvider: falls back to generated names when config.models is absent", () => {
+test("registerPageSpaceProvider: falls back to generated name when config.models is absent", () => {
   const calls: any[] = [];
   const pi = { registerProvider: (_name: string, cfg: any) => calls.push(cfg) };
   const config = {
@@ -173,13 +172,12 @@ test("registerPageSpaceProvider: falls back to generated names when config.model
     defaultDriveSlug: "pagespace-cli",
     mountPrefix: "pagespace",
     modelPageId: "agent_a",
-    modelPageIds: ["agent_a", "agent_b"],
   };
 
   const out = registerPageSpaceProvider(pi as any, config as any);
-  assert.deepEqual(out.modelIds, ["PageSpace Brain (agent_a)", "PageSpace Brain (agent_b)"]);
+  assert.deepEqual(out.modelIds, ["PageSpace Brain"]);
   assert.deepEqual(
     calls[0].models.map((m: any) => m.id),
-    ["PageSpace Brain (agent_a)", "PageSpace Brain (agent_b)"],
+    ["PageSpace Brain"],
   );
 });
