@@ -119,6 +119,23 @@ export class PageSpaceApi {
     return this.request<Page[]>("GET", `/api/drives/${driveId}/pages`);
   }
 
+  /** All AI_CHAT pages in the drive identified by slug, with their page titles as names. */
+  async listAgentsByDriveSlug(driveSlug: string): Promise<{ id: string; name: string }[]> {
+    const drives = await this.listDrives();
+    const drive = drives.find((d) => d.slug === driveSlug);
+    if (!drive) return [];
+    const pages = await this.listPages(drive.id);
+    const out: { id: string; name: string }[] = [];
+    const walk = (nodes: Page[]) => {
+      for (const p of nodes) {
+        if (p.type === "AI_CHAT") out.push({ id: p.id, name: p.title });
+        if (p.children) walk(p.children);
+      }
+    };
+    walk(pages);
+    return out;
+  }
+
   createPage(input: {
     driveId: string;
     title: string;
