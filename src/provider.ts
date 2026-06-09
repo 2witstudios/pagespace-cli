@@ -357,8 +357,10 @@ export function createPageSpaceStreamSimple(config: PageSpaceConfig) {
           : oaMessages;
         // Client-only native function-calling: hand the model pi's own tools and turn off the agent
         // page's server-side tools (+ the forced `finish` tool) — pi runs the loop locally.
+        // model.id is the pi display name; look up the real PageSpace page id from config.models.
+        const pageId = config.models?.find((m) => (m.name ?? m.id) === model.id)?.id ?? model.id;
         const body: Record<string, unknown> = {
-          model: toAgentModel(model.id),
+          model: toAgentModel(pageId),
           stream: true,
           messages,
           disable_server_tools: true,
@@ -481,7 +483,12 @@ export function registerPageSpaceProvider(
       id,
       name: undefined,
     }));
-  const modelIds = modelSpecs.map((m) => m.id);
+  // pi model id = display name (shown in footer, /model list, Shift+Tab).
+  // The PageSpace page id is an API routing detail resolved inside streamSimple.
+  const piId = (m: { id: string; name?: string }) =>
+    m.name ??
+    (modelSpecs.length > 1 ? `PageSpace Brain (${m.id.slice(0, 8)})` : (spec.name ?? "PageSpace Brain"));
+  const modelIds = modelSpecs.map(piId);
   pi.registerProvider(providerName, {
     name: "PageSpace",
     baseUrl: `${config.apiUrl.replace(/\/$/, "")}/api/v1`,
@@ -489,10 +496,8 @@ export function registerPageSpaceProvider(
     api: "openai-completions",
     streamSimple: createPageSpaceStreamSimple(config),
     models: modelSpecs.map((m) => ({
-      id: m.id,
-      name:
-        m.name ??
-        (modelSpecs.length > 1 ? `PageSpace Brain (${m.id.slice(0, 8)})` : (spec.name ?? "PageSpace Brain")),
+      id: piId(m),
+      name: piId(m),
       reasoning: false,
       input: ["text"] as ("text" | "image")[],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

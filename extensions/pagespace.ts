@@ -235,7 +235,9 @@ export default async function (pi: ExtensionAPI) {
   // Verified end-to-end (test/run-provider.ts). Registers when at least one brain page id is configured
   // (PAGESPACE_MODEL_PAGE and/or PAGESPACE_MODEL_PAGES), enabling quick /model toggling between agents.
   // Skip cleanly if unset so the file tools still load. Works with any function-calling-capable model.
-  const configuredModelIds = config.modelPageIds ?? [];
+  const configuredModelIds = config.models
+    ? config.models.map((m) => m.name ?? m.id)
+    : (config.modelPageIds ?? []);
   if (configuredModelIds.length > 0) {
     const { providerName, modelIds } = registerPageSpaceProvider(pi, config);
     void providerName;
