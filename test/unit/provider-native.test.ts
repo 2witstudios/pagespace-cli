@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { convertTools, toOpenAIMessages } from "../../src/provider.ts";
+import { convertTools, toOpenAIMessages, registerPageSpaceProvider } from "../../src/provider.ts";
 
 // pi Message/Tool shapes are constructed loosely here; the helpers only read role/content/parameters.
 const msgs = (arr: unknown[]) => toOpenAIMessages(arr as Parameters<typeof toOpenAIMessages>[0]);
@@ -137,4 +137,25 @@ test("convertTools: maps to OpenAI function tool shape", () => {
 
 test("convertTools: empty → empty", () => {
   assert.deepEqual(convertTools([]), []);
+});
+
+test("registerPageSpaceProvider: registers one model per configured agent id", () => {
+  const calls: any[] = [];
+  const pi = { registerProvider: (_name: string, cfg: any) => calls.push(cfg) };
+  const config = {
+    apiUrl: "https://pagespace.ai",
+    authToken: "mcp_x",
+    defaultDriveSlug: "pagespace-cli",
+    mountPrefix: "pagespace",
+    modelPageId: "agent_a",
+    modelPageIds: ["agent_a", "agent_b"],
+  };
+
+  const out = registerPageSpaceProvider(pi as any, config as any);
+  assert.deepEqual(out.modelIds, ["agent_a", "agent_b"]);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(
+    calls[0].models.map((m: any) => m.id),
+    ["agent_a", "agent_b"],
+  );
 });

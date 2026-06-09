@@ -38,6 +38,11 @@ const CONFIG_KEYS: { key: string; required: boolean; label: string }[] = [
   { key: "PAGESPACE_API_URL", required: false, label: "instance URL (default https://pagespace.ai)" },
   { key: "PAGESPACE_DRIVE", required: false, label: "default drive slug (mount + memory)" },
   { key: "PAGESPACE_MODEL_PAGE", required: false, label: "brain agent page id (ps-agent://<id>)" },
+  {
+    key: "PAGESPACE_MODEL_PAGES",
+    required: false,
+    label: "comma-separated brain agent ids for /model toggling",
+  },
 ];
 
 /** Validate the PageSpace env config and produce a report. Pure; the `status` subcommand mirrors this. */

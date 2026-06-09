@@ -49,6 +49,7 @@ const CONFIG_KEYS = [
   ["PAGESPACE_API_URL", false, "instance URL (default https://pagespace.ai)"],
   ["PAGESPACE_DRIVE", false, "default drive slug (mount + memory)"],
   ["PAGESPACE_MODEL_PAGE", false, "brain agent page id (ps-agent://<id>)"],
+  ["PAGESPACE_MODEL_PAGES", false, "comma-separated brain agent ids for /model toggling"],
 ];
 
 async function statusDoctor() {
