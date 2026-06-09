@@ -44,7 +44,7 @@ pagespace                    # start a coding session
 pagespace status             # config check + live auth ping
 pagespace sessions           # list synced sessions
 pagespace resume <id>        # continue a session from another machine
-# inside a session: /model   # switch between configured agents/models
+# inside a session: /model or Ctrl+Shift+A  # switch between configured agents
 ```
 
 ## Auth & config
