@@ -35,6 +35,20 @@ export function textFromContent(content: unknown): string {
   return "";
 }
 
+/** Extract the touched file path from a tool call block, if applicable. */
+function fileFromToolCall(name: string, args: Record<string, unknown>): string | null {
+  const s = (v: unknown) => (typeof v === "string" ? v : "");
+  switch (name) {
+    case "read":
+      return s(args.path) || null;
+    case "write":
+    case "edit":
+      return s(args.file_path) || null;
+    default:
+      return null;
+  }
+}
+
 export interface SessionEntryInput {
   /** The user request the agent just handled. */
   request: string;
@@ -42,6 +56,8 @@ export interface SessionEntryInput {
   summary: string;
   /** Number of tool calls the assistant made. */
   toolCalls: number;
+  /** Deduplicated list of files read or written during the turn. */
+  files: string[];
 }
 
 /** Pull a loggable summary out of an agent_end message list, or null if there's nothing to log. */
@@ -49,6 +65,7 @@ export function extractEntryInput(messages: MessageLike[]): SessionEntryInput | 
   let request = "";
   let summary = "";
   let toolCalls = 0;
+  const fileSet = new Set<string>();
   for (const m of messages) {
     if (m.role === "user") {
       const t = textFromContent(m.content).trim();
@@ -57,12 +74,20 @@ export function extractEntryInput(messages: MessageLike[]): SessionEntryInput | 
       const t = textFromContent(m.content).trim();
       if (t) summary = t;
       if (Array.isArray(m.content)) {
-        toolCalls += m.content.filter((c) => (c as { type?: unknown })?.type === "toolCall").length;
+        for (const c of m.content) {
+          const block = c as { type?: unknown; name?: unknown; arguments?: unknown };
+          if (block?.type !== "toolCall") continue;
+          toolCalls++;
+          const name = typeof block.name === "string" ? block.name : "";
+          const args = (block.arguments as Record<string, unknown>) ?? {};
+          const file = fileFromToolCall(name, args);
+          if (file) fileSet.add(file);
+        }
       }
     }
   }
   if (!request && !summary) return null;
-  return { request, summary, toolCalls };
+  return { request, summary, toolCalls, files: [...fileSet] };
 }
 
 const clip = (s: string, n: number): string => {
@@ -73,6 +98,11 @@ const clip = (s: string, n: number): string => {
 /** Format one concise, append-only Activity Log line. Pure. */
 export function formatSessionEntry(timestamp: string, input: SessionEntryInput): string {
   const parts = [`- _${timestamp}_ — pi: "${clip(input.request, 120)}"`];
+  if (input.files.length > 0) {
+    const shown = input.files.slice(0, 5);
+    const suffix = input.files.length > 5 ? ` +${input.files.length - 5}` : "";
+    parts.push(`[${shown.join(", ")}${suffix}]`);
+  }
   if (input.toolCalls > 0) parts.push(`${input.toolCalls} tool call${input.toolCalls === 1 ? "" : "s"}`);
   if (input.summary) parts.push(`→ ${clip(input.summary, 140)}`);
   return parts.join(" · ");
