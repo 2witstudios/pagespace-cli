@@ -53,11 +53,12 @@ export default async function (pi: ExtensionAPI) {
   config.conversationId = globalThis.crypto.randomUUID();
   const api = new PageSpaceApi(config);
 
-  // Auto-discover agents from the page tree when PAGESPACE_MODEL_PAGES is not explicitly set.
-  // Uses AI_CHAT page titles as display names — accurate, no dependence on /api/v1/models name field.
-  if (!process.env.PAGESPACE_MODEL_PAGES?.trim() && config.defaultDriveSlug) {
+  // Auto-discover agents from every drive the token can access (default drive's agents first)
+  // when PAGESPACE_MODEL_PAGES is not explicitly set. Uses AI_CHAT page titles as display names —
+  // accurate, no dependence on /api/v1/models name field.
+  if (!process.env.PAGESPACE_MODEL_PAGES?.trim()) {
     try {
-      const discovered = await api.listAgentsByDriveSlug(config.defaultDriveSlug);
+      const discovered = await api.listAgentsAllDrives(config.defaultDriveSlug);
       if (discovered.length > 0) {
         const primary = config.modelPageId;
         const rest = discovered.filter((m) => m.id !== primary);
