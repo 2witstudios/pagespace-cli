@@ -47,6 +47,42 @@ export interface TaskRecord {
   [key: string]: unknown;
 }
 
+export interface AgentSpec {
+  id: string;
+  name: string;
+}
+
+/** All AI_CHAT pages in a page tree, depth-first, with page titles as names. Pure. */
+export function collectAgentPages(pages: Page[]): AgentSpec[] {
+  const out: AgentSpec[] = [];
+  const walk = (nodes: Page[]) => {
+    for (const p of nodes) {
+      if (p.type === "AI_CHAT") out.push({ id: p.id, name: p.title });
+      if (p.children) walk(p.children);
+    }
+  };
+  walk(pages);
+  return out;
+}
+
+/** Preferred drive first, others in given order. Pure. */
+export function orderDrivesPreferredFirst(drives: Drive[], preferredSlug?: string): Drive[] {
+  if (!preferredSlug) return drives;
+  return [...drives].sort((a, b) => (a.slug === preferredSlug ? -1 : b.slug === preferredSlug ? 1 : 0));
+}
+
+/**
+ * Disambiguate duplicate agent names by suffixing a short page-id fragment — pi model ids are
+ * the display names, so duplicates across drives would otherwise collide in the registry. Pure.
+ */
+export function dedupeAgentNames(agents: AgentSpec[]): AgentSpec[] {
+  const counts = new Map<string, number>();
+  for (const a of agents) counts.set(a.name, (counts.get(a.name) ?? 0) + 1);
+  return agents.map((a) =>
+    (counts.get(a.name) ?? 0) > 1 ? { ...a, name: `${a.name} (${a.id.slice(0, 8)})` } : a,
+  );
+}
+
 /** Transient HTTP statuses worth retrying (rate-limit + gateway/availability). */
 const RETRIABLE_STATUS = new Set([429, 502, 503, 504]);
 
@@ -119,21 +155,15 @@ export class PageSpaceApi {
     return this.request<Page[]>("GET", `/api/drives/${driveId}/pages`);
   }
 
-  /** All AI_CHAT pages in the drive identified by slug, with their page titles as names. */
-  async listAgentsByDriveSlug(driveSlug: string): Promise<{ id: string; name: string }[]> {
-    const drives = await this.listDrives();
-    const drive = drives.find((d) => d.slug === driveSlug);
-    if (!drive) return [];
-    const pages = await this.listPages(drive.id);
-    const out: { id: string; name: string }[] = [];
-    const walk = (nodes: Page[]) => {
-      for (const p of nodes) {
-        if (p.type === "AI_CHAT") out.push({ id: p.id, name: p.title });
-        if (p.children) walk(p.children);
-      }
-    };
-    walk(pages);
-    return out;
+  /**
+   * All AI_CHAT pages across every drive the token can access, preferred drive's agents first.
+   * A drive whose page tree fails to load is skipped — discovery degrades, never throws.
+   */
+  async listAgentsAllDrives(preferredSlug?: string): Promise<AgentSpec[]> {
+    const drives = orderDrivesPreferredFirst(await this.listDrives(), preferredSlug);
+    const trees = await Promise.allSettled(drives.map((d) => this.listPages(d.id)));
+    const agents = trees.flatMap((t) => (t.status === "fulfilled" ? collectAgentPages(t.value) : []));
+    return dedupeAgentNames(agents);
   }
 
   createPage(input: {
