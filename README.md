@@ -1,221 +1,201 @@
 # pagespace-cli
 
-**The PageSpace coding harness.**
+**A PageSpace-native coding harness built on pi.**
 
-pagespace-cli wires [PageSpace](https://pagespace.ai) as the substrate for an AI coding session —
-filesystem, model brain, memory, and task board — using deterministic harness primitives so the
-agent always has the right context, can't skip PageSpace, and produces verifiable outcomes. Built on
-[pi](https://pi.dev) with PageSpace as the model brain and a dual-mount filesystem adapter.
+`pagespace-cli` turns PageSpace into first-class runtime substrate for coding sessions: PageSpace pages are mounted into the agent filesystem, PageSpace AI agents are used as the model brain, and project memory/tasks are grounded from the drive. The key design goal is deterministic wiring in the harness (extension/hooks/gates), not “hope the model remembers to use the right tool.”
+
+## Features
+
+- **Dual-mount filesystem routing**
+  - `read`/`write`/`edit`/`ls`/`find`/`grep` route by path.
+  - Paths under `pagespace/<drive>/...` operate on PageSpace pages.
+  - Local repo paths stay local; `bash` is always local.
+- **PageSpace model brain via native function-calling**
+  - Uses `POST /api/v1/chat/completions` with model `ps-agent://<pageId>`.
+  - Sends pi tools as native `tools` and sets `disable_server_tools: true`.
+  - Model returns native `tool_calls`; pi executes tools locally.
+- **Model auto-discovery by default**
+  - Discovers AI_CHAT agent pages across all drives visible to your token.
+  - Prioritizes your default drive’s agents first.
+  - Provider name is `pagespace`; switch agents with `/model` or `Shift+Tab`.
+- **Deterministic memory/context hooks**
+  - Injects standing drive context + relevant Brain notes.
+  - Persists concise session entries to `Activity Log`.
+  - Writes compaction summaries to durable memory pages.
+- **AIDD modules implemented as harness tools**
+  - Includes `requirements`, `review`, `fix`, `churn`, and `subagent` primitives.
+- **Spec-gated build loop**
+  - Includes `build` and `task_complete` tooling with gate + review flow.
+- **Cross-machine session resume**
+  - `pagespace sessions` + `pagespace resume <id>` for continuing synced conversations.
+- **Isolated `pagespace` entrypoint**
+  - Uses its own agent dir at `~/.pagespace/agent`.
+  - Locks `allowedProviders` to `pagespace` for this launcher.
+  - Registers skills from `skills/<name>/SKILL.md` as unprefixed `/<name>` commands.
 
 ## Quickstart
 
 ```bash
-npm i -g @earendil-works/pi-coding-agent
-cd path/to/pagespace-cli && npm install
-export PAGESPACE_AUTH_TOKEN="<your scoped token>"
-pagespace
+git clone https://github.com/2witstudios/pagespace-cli.git
+cd pagespace-cli
+npm install
 ```
 
-> First run: `npm link` from inside the repo to put `pagespace` on your PATH, or use
-> `node bin/pagespace.mjs` directly. After that, `pagespace` is all you need.
+`npm install` resolves the vendored pi workspaces in this monorepo (`packages/pi-agent-core`, `packages/pi-ai`, `packages/pi-coding-agent`, `packages/pi-tui`). You do **not** need a global `@earendil-works/pi-coding-agent` install.
 
-Check your setup (env report + a live auth ping):
+Create local config (recommended):
+
+```bash
+cp .env.example .env.local
+# then edit .env.local and set at least PAGESPACE_AUTH_TOKEN
+```
+
+Launch either way:
+
+```bash
+npm link
+pagespace
+
+# or without linking
+node bin/pagespace.mjs
+```
+
+Run the doctor:
 
 ```bash
 pagespace status
 ```
 
-## How it works
-
-Two axes, always active — wired in **deterministically** (code that runs every turn, not
-model-discretion tool calls):
-
-- **Dual-mount filesystem.** `read`/`write`/`edit`/`ls`/`find`/`grep` route by path: anything
-  under `pagespace/<drive>/…` operates on PageSpace pages; everything else is the local repo;
-  `bash` stays local. PageSpace mounts in as the spec/knowledge/memory layer.
-- **PageSpace as the model brain.** LLM calls go to PageSpace `POST /api/v1/chat/completions`
-  (model `ps-agent://<pageId>`) using native function-calling — pi's tools run locally; the
-  PageSpace route never sees tools, just the model output.
-
 ## Commands
 
 ```bash
-pagespace                    # start a coding session
-pagespace status             # config check + live auth ping
-pagespace sessions           # list synced sessions
-pagespace resume <id>        # continue a session from another machine
-# inside a session: /model or Shift+Tab  # switch between configured agents
+pagespace                    # start the harness
+pagespace status             # env + connectivity doctor
+pagespace sessions           # list conversations for PAGESPACE_MODEL_PAGE
+pagespace resume <id>        # resume by exact id or unique prefix
 ```
 
-## Auth & config
+In-session model switching:
 
-Configure via environment variables. The simplest durable approach is a **`.env.local`** in the
-repo root — the extension and the `pagespace` launcher load `.env.local` then `.env` automatically
-(`src/env.ts`); real shell exports always win. `.env*` is gitignored, so your token stays out of git.
+- `/model`
+- `Shift+Tab` (cycles configured/discovered PageSpace agents)
 
-```bash
-cat > .env.local <<'EOF'
-PAGESPACE_API_URL=https://pagespace.ai
-PAGESPACE_AUTH_TOKEN=mcp_your_scoped_token
-PAGESPACE_DRIVE=pagespace-cli
-PAGESPACE_MODEL_PAGE=your_primary_brain_agent_page_id
-PAGESPACE_MODEL_PAGES=your_primary_brain_agent_page_id,your_alt_agent_page_id
-EOF
-```
+## Configuration
 
-| Var | Required | Purpose |
-|-----|----------|---------|
-| `PAGESPACE_AUTH_TOKEN` | **yes** | Scoped PageSpace MCP token (Bearer). |
-| `PAGESPACE_API_URL` | no | Instance URL (default `https://pagespace.ai`). |
-| `PAGESPACE_DRIVE` | no | Default drive slug for the mount + memory engine. |
-| `PAGESPACE_MODEL_PAGE` | no | Primary brain agent page id — also used by session commands (`sessions`/`resume`). |
-| `PAGESPACE_MODEL_PAGES` | no | Comma-separated brain agent ids to register multiple `pagespace/<id>` models for quick `/model` toggling. |
-| `PAGESPACE_READONLY` | no | Comma-separated mount sub-paths the write/edit tools refuse (spec immutability), e.g. `Specs,Epics`. |
+### Environment variables
 
-### Brain agent page
+By default, launcher/extension load `.env.local` then `.env` (shell env still wins). Configure with:
 
-`PAGESPACE_MODEL_PAGE` (and optionally `PAGESPACE_MODEL_PAGES`) register one or more
-`pagespace/<pageId>` models. Select between them with `/model` inside a session, or set a default
-once in `~/.pi/agent/settings.json`:
+| Variable | Required | Purpose |
+|---|---|---|
+| `PAGESPACE_AUTH_TOKEN` | **Yes** | Scoped PageSpace token for API access. |
+| `PAGESPACE_API_URL` | No | PageSpace base URL. Default: `https://pagespace.ai`. |
+| `PAGESPACE_DRIVE` | No | Default drive slug used for mount + memory grounding order. |
+| `PAGESPACE_MOUNT` | No | Mount prefix in your cwd. Default: `pagespace`. |
+| `PAGESPACE_MODEL_PAGE` | No | Optional primary brain agent page id (pin first model). |
+| `PAGESPACE_MODEL_PAGES` | No | Optional comma-separated additional agent page ids. |
+| `PAGESPACE_READONLY` | No | Optional comma-separated mounted prefixes to protect from write/edit (e.g. `Specs,Epics`). |
 
-```json
-{ "defaultProvider": "pagespace", "defaultModel": "<your brain agent page id>" }
-```
+### Auto-discovery first, pinning optional
 
-The models register when at least one of `PAGESPACE_MODEL_PAGE` or `PAGESPACE_MODEL_PAGES`
-is set *and* the extension is loaded — set them in `.env.local` and launch via `pagespace`.
+If `PAGESPACE_MODEL_PAGES` is not set, the extension auto-discovers model agents across all accessible drives and registers them under provider `pagespace`.
 
-## Skills
+Use `PAGESPACE_MODEL_PAGE` / `PAGESPACE_MODEL_PAGES` only when you want to pin or extend the model list explicitly.
 
-The harness ships its own **PageSpace-AIDD** skill set under `skills/` (`pagespace-aidd-*` — a
-rebranded, PageSpace-adapted fork of [AIDD](https://github.com/paralleldrive/aidd), plus
-`pagespace-*` natives). The `pagespace` launcher is the **isolated entrypoint**: it starts pi with
-`--no-skills` and loads *only* these vendored skills, so your user-global `~/.agents/skills` never
-bleed in and there are no skill-name collisions.
+### `.env.local` vs `.mcp.json`
 
-## Cross-machine resume
+These are separate configuration paths:
 
-Sessions sync through PageSpace so you can **start a conversation on one machine and finish it on
-another**. As you work, the active session (its JSONL) is mirrored to a page under the Companion
-Agent (`Sessions/` folder). On another machine:
+- **`.env.local` / `.env`**: consumed directly by `pagespace` launcher + extension runtime.
+- **`.mcp.json`** (gitignored): MCP server config format (see `.mcp.json.example`) that can also hold the same token for MCP workflows.
 
-```bash
-pagespace sessions
-pagespace resume <id>
-```
+`pagespace status` will suggest `.mcp.json.example` when required env is missing, but runtime behavior is still based on process env.
 
-`resume` pulls the session back into pi's local store and continues it natively via `pi --session`
-(full fidelity — tool calls and all). Needs `PAGESPACE_MODEL_PAGE` set. Hand-off is sequential
-(stop on A, resume on B); it's last-writer-wins, not live co-editing.
+## How it works
 
-Sync is **append-only**: each turn uploads just the new session lines (cheap for long sessions),
-with a full re-render on compaction/shutdown to refresh the readable transcript.
+### 1) Dual-mount files
 
-## Architecture
+`extensions/pagespace.ts` replaces file tools with path-aware routers:
 
-PageSpace is the substrate — filesystem, model/brain, memory, and task list — wired in
-**deterministically** (code that runs every turn) rather than left to the model's discretion. One
-extension (`extensions/pagespace.ts`) composes it all.
+- under mounted PageSpace path: operate on PageSpace pages via API
+- outside mount: use local filesystem tools
+- `grep` on mounted paths uses server-side regex search
+- `bash` remains local-only
 
-### Two axes
-- **Dual-mount files.** `read`/`write`/`edit`/`ls`/`find`/`grep` are routed by path: anything
-  under `pagespace/<drive>/…` operates on PageSpace pages (`src/ops.ts` over the REST client
-  `src/api.ts` + a path↔page resolver `src/resolve.ts`); everything else is the local repo; `bash`
-  stays local. `grep` under the mount uses the drive's server-side `regex_search`.
-- **PageSpace brain.** LLM calls go to PageSpace `POST /api/v1/chat/completions`
-  (model `ps-agent://<pageId>`) using **native function-calling** (`src/provider.ts`): the request
-  sends pi's tools + `disable_server_tools` (the route's client-only mode), the model returns native
-  `tool_calls`, and pi runs each tool locally — the whole tool loop stays in pi. (This replaced an
-  earlier prompted-tool text shim once the route accepted client `tools`, PageSpace #1559.)
+### 2) PageSpace as model brain
 
-### Deterministic memory engine (Epic 2)
-- **Context auto-load** (`before_agent_start`): injects the drive's `Vision` + `_index` + Brain index
-  + Epics board into every session (`src/context-engine.ts`).
-- **Per-turn retrieval**: keyword-searches the Brain for the turn's prompt and injects the top notes
-  within a budget (`src/retrieval.ts`).
-- **Auto-persist** (`agent_end`): appends a concise entry to the `Activity Log` (`src/persistence.ts`).
-- **Compaction → durable memory** (`session_compact`): writes the summary to a durable `Sessions`
-  page (`src/compaction.ts`).
+`src/provider.ts` registers provider `pagespace` and calls:
 
-### AIDD as harness modules (Epic 3)
-Judgment steps run as **deterministically-invoked LLM steps** over `src/brain.ts`, with their output
-validated in code: `requirements` (schema-validated Given/should), `review` (a gate verdict), `fix`
-(diagnose + propose). Plus `churn` (git hotspots), a `subagent` fan-out primitive (spawns
-`pagespace --mode json` children), and discretionary guidance **skills** under `skills/`.
+- `POST /api/v1/chat/completions`
+- `model: ps-agent://<pageId>`
+- includes pi-native `tools`
+- `disable_server_tools: true`
 
-### Spec-gated `/build` engine (Epic 4)
-"Done" is enforced, not claimed. Each leaf's spec page carries `Given X, should Y` + runnable
-`gate:` commands (`src/spec.ts`). The flow: pick the next unblocked leaf (dependency-aware via
-`depends-on:`) → implement → **shell gate** (`src/gate.ts`) → **mandatory review** (`src/review.ts`)
-→ gated completion (`src/complete.ts` flips status only when both pass — the agent has no raw
-status-write tool, only `task_complete`/`build`). **Separation of duties**: specs are read-only to
-the implementer (`PAGESPACE_READONLY`); only the gate-runner completes. **Rails** (`src/rails.ts`):
-per-leaf attempt caps + a budget guard (escalate, never relax the spec). The `/build` loop driver is
-`src/build.ts`.
+The model streams native `tool_calls`; pi executes those tools locally and returns tool results in the next turn. No text tool shim.
 
-### Registered tools
-`read` · `write` · `edit` · `ls` · `find` · `grep` · `bash` (pi built-in) · `pagespace_status` ·
-`subagent` · `churn` · `task_complete` · `build` — and, when a brain page is configured,
-`requirements` · `review` · `fix`. Plus the `pagespace` model provider and the memory/persistence hooks.
+## Architecture (condensed)
 
-The project's plan, knowledge, and task board live in the **PageSpace `pagespace-cli` drive** (see its
-`Brain`, `Vision`, `Epics`, and `Activity Log` pages) — the source of truth a stateless agent grounds on.
+The core composition lives in `extensions/pagespace.ts`: tool routing, provider registration, skill command registration, model switching shortcuts, deterministic memory hooks, and gated build/task tools.
 
-## Layout
+`src/` contains focused modules for:
 
-- `extensions/pagespace.ts` — the extension entry (dual-mount adapter + provider + memory hooks + AIDD/build tools)
-- `src/` — modules (config, api, resolve, ops, tool-call-parser, provider; context-engine, retrieval,
-  persistence, compaction; brain, requirements, review, fix, churn, subagent; spec, gate, complete,
-  build, rails; cli)
-- `bin/pagespace.mjs` — the launcher (+ `pagespace status` doctor)
-- `skills/`, `prompts/` — harness skills + AIDD workflow prompts
-- `test/unit/` — fast, network-free unit tests (run in CI); `test/run-*.ts` — live integration tests
+- PageSpace API + path resolution + mounted file ops
+- Provider + brain call plumbing
+- Context engine, retrieval, persistence, compaction
+- AIDD/tooling primitives (`requirements`, `review`, `fix`, `churn`, `subagent`)
+- Spec/gate/complete/build flow (`spec`, `gate`, `complete`, `build`, `rails`)
+
+For deep design context and roadmap state, use the PageSpace drive `pagespace-cli` as source of truth (`Vision`, `Brain`, `Epics`, `Activity Log`).
 
 ## Development
 
 ```bash
-npm install
 npm run typecheck
 npm run lint
-npm test
+npm run format
+npm run test
 npm run check
 npm run test:live
+npm run build
 ```
 
-- `npm install` — deps + the husky pre-commit hook.
-- `npm run typecheck` — `tsc --noEmit`.
-- `npm run lint` — biome; `npm run format` rewrites in place.
-- `npm test` — unit tests, no network.
-- `npm run check` — typecheck + lint + unit tests; this is also the pre-commit gate.
-- `npm run test:live` — live integration tests; needs `PAGESPACE_AUTH_TOKEN` + `PAGESPACE_MODEL_PAGE`.
+- **Unit tests**: `test/unit/*.test.ts` (fast, no network; used in CI)
+- **Live tests**: `test/run-*.ts` (require real token/model config)
 
-To load the extension during development without installing globally:
+`npm run check` (typecheck + lint + unit tests) is the pre-commit gate via husky.
+
+For contributor flow, see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+
+Optional for pi-local development flows:
 
 ```bash
-cd path/to/pagespace-cli
 pi install -l .
-pi
 ```
 
-`pi install -l .` registers the extension/skills/prompts for the pi runtime from the current
-directory. Run it **from inside the repo** — running it from the wrong folder registers the wrong path.
-
-Contributions go through PRs to `main`; CI (`.github/workflows/ci.yml`) runs typecheck, lint, and
-unit tests on every PR and must pass before merge. See [CONTRIBUTING.md](./CONTRIBUTING.md).
+(Useful when loading this package directly into a pi runtime during development.)
 
 ## Install & distribution
 
-pagespace-cli is a pi package: after `pi install -l .`, the pi runtime discovers the extension,
-skills, and prompts automatically.
+- Root package is `private: true` and not published.
+- Exposed CLI bin: `pagespace` → `bin/pagespace.mjs`.
+- Packaged files include `extensions`, `src`, `skills`, `prompts`, `bin`, `packages`, `README.md`.
+
+Local distribution options:
 
 ```bash
-npm link           # expose pagespace bin on your PATH
-npm pack           # build a shareable tarball: pagespace-cli-VERSION.tgz
+npm link   # put pagespace on PATH locally
+npm pack   # create a tarball
 ```
 
-The package is `private` (not published to npm). To publish later (a human decision): set
-`"private": false`, confirm `name`/`version`/`files`/`bin`, then `npm publish`. `files` already
-ships `extensions`, `src`, `skills`, `prompts`, `bin`, and the README; the pi peer deps
-(`@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `typebox`) stay peer dependencies.
+There is currently no `peerDependencies` section in the root `package.json`; this repo vendors required pi packages via npm workspaces.
 
-Status and plan tracked in PageSpace (drive `pagespace-cli`): see the **Brain** and **Epics** pages.
+## Status & pointers
+
+Code in `src/` already includes memory/context, AIDD modules, and spec-gated build tooling. Roadmap tracking in the PageSpace Epics board may still show later epics as planned while implementation continues.
+
+When in doubt, treat the PageSpace `pagespace-cli` drive as canonical:
+
+- `Vision` (north star)
+- `Brain` (architecture/grounding notes)
+- `Epics` (task board)
+- `Activity Log` (history)
