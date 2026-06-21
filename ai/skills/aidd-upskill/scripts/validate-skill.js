@@ -9,7 +9,11 @@
 import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "url";
-import yaml from "js-yaml";
+// Use the "yaml" package (a declared transitive dep of the vendored pi workspaces,
+// guaranteed present after `npm install`) rather than "js-yaml", which is not a
+// dependency of this repo and only resolves incidentally via node_modules hoisting
+// on machines that happen to have it from an unrelated project.
+import { parse as parseYaml } from "yaml";
 
 export const parseSkillMd = (content) => {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
@@ -87,7 +91,7 @@ export const validateSkillContent = (content, dirName) => {
   let parsedFrontmatter;
   try {
     parsedFrontmatter = frontmatter
-      ? yaml.load(frontmatter, { schema: yaml.DEFAULT_SAFE_SCHEMA })
+      ? parseYaml(frontmatter)
       : {};
   } catch (e) {
     errors.push(`Invalid YAML in frontmatter: ${e.message}`);
