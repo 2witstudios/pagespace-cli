@@ -347,6 +347,84 @@ async function loginCommand() {
   process.stderr.write(`pagespace · token saved to ${credPath} (0600). Run: pagespace status\n`);
 }
 
+// Drive the full first-run onboarding flow (token → validate → drives → models → default → materialize)
+// using the pure state machine in src/onboarding.ts (mirrored here). Each step performs its effect,
+// feeds the result into nextOnboardingStep, and loops until done. Materialize writes the chosen
+// defaults to the credential store + env so the provider picks them up on relaunch.
+async function runOnboarding() {
+  const STEP_ORDER = ["token", "validate", "drives", "models", "default", "done"];
+  let state = { step: "token", token: null, apiUrl: (process.env.PAGESPACE_API_URL || "https://pagespace.ai").replace(/\/$/, ""), drives: null, defaultDrive: null, models: null, defaultModel: null };
+
+  const advance = (input = {}) => {
+    const s = { ...state };
+    switch (s.step) {
+      case "token": { const t = (input.token ?? s.token ?? "").trim(); if (t) { s.token = t; s.step = "validate"; } break; }
+      case "validate": { if (input.validated) s.step = "drives"; else { s.step = "token"; s.token = null; } break; }
+      case "drives": { const d = input.drives; if (d && d.length) { s.drives = d; s.defaultDrive = d[0].slug; s.step = "models"; } break; }
+      case "models": { const m = input.models; if (m) { s.models = m; s.defaultModel = m[0] || null; } s.step = "default"; break; }
+      case "default": { s.step = "done"; break; }
+    }
+    state = s;
+  };
+
+  const base = (process.env.PAGESPACE_API_URL || "https://pagespace.ai").replace(/\/$/, "");
+
+  // STEP token: capture via loginCommand's prompt logic (reuse the capture+validate+persist).
+  process.stderr.write("pagespace · first run — let's get you set up.\n");
+  process.stderr.write("Paste your PageSpace token (input is hidden): ");
+  const readline = await import("node:readline/promises");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  let token;
+  try { token = (await rl.question("")).trim(); } finally { rl.close(); }
+  if (!token) { console.error("pagespace: no token entered — nothing saved."); process.exit(1); }
+  advance({ token });
+
+  // STEP validate: auth ping.
+  try {
+    const res = await fetch(`${base}/api/drives`, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) { console.error(`pagespace: token rejected by ${base} (HTTP ${res.status}).`); process.exit(1); }
+    advance({ validated: true });
+  } catch (err) {
+    console.error(`pagespace: cannot reach ${base} (${err.message}).`);
+    process.exit(1);
+  }
+
+  // STEP drives: discover accessible drives.
+  const drivesRaw = await fetch(`${base}/api/drives`, { headers: { authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => []);
+  const drives = (Array.isArray(drivesRaw) ? drivesRaw : drivesRaw?.drives || []).map((d) => ({ id: d.id, name: d.name, slug: d.slug }));
+  if (drives.length === 0) { console.error("pagespace: no drives accessible to this token."); process.exit(1); }
+  console.log(`  ✓ discovered ${drives.length} drive(s): ${drives.map((d) => d.slug).join(", ")}`);
+  advance({ drives });
+
+  // STEP models: discover agent pages across all drives (preferred drive first).
+  const preferred = state.defaultDrive;
+  const ordered = [...drives].sort((a, b) => (a.slug === preferred ? -1 : b.slug === preferred ? 1 : 0));
+  const modelRes = await Promise.allSettled(ordered.map((d) =>
+    fetch(`${base}/api/drives/${d.id}/pages`, { headers: { authorization: `Bearer ${token}` } }).then((r) => r.json())
+  ));
+  const models = [];
+  const walk = (nodes) => { for (const n of nodes) { if (n.type === "AI_CHAT") models.push({ id: n.id, name: n.title }); if (n.children) walk(n.children); } };
+  for (const r of modelRes) if (r.status === "fulfilled" && Array.isArray(r.value)) walk(r.value);
+  console.log(`  ✓ discovered ${models.length} agent model(s)${models.length ? ": " + models.map((m) => m.name).join(", ") : ""}`);
+  advance({ models });
+
+  // STEP default: choose first model (auto). STEP done: materialize.
+  advance();
+
+  // Materialize: persist token + chosen defaults to the credential store + env (token isolation holds).
+  const dir = path.join(os.homedir(), ".pagespace");
+  const credPath = path.join(dir, "credentials");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(credPath, JSON.stringify({ token, apiUrl: base, savedAt: new Date().toISOString() }, null, 2), { mode: 0o600 });
+  fs.chmodSync(credPath, 0o600);
+  if (state.defaultDrive) process.env.PAGESPACE_DRIVE = state.defaultDrive;
+  if (state.defaultModel) process.env.PAGESPACE_MODEL_PAGE = state.defaultModel.id;
+  process.env.PAGESPACE_AUTH_TOKEN = token; // launcher env only — launchPi strips it before spawn
+  console.log(`  ✓ default drive: ${state.defaultDrive || "(none)"}`);
+  console.log(`  ✓ default model: ${state.defaultModel?.name || "(none)"} (${state.defaultModel?.id?.slice(0, 8) || ""})`);
+  process.stderr.write(`pagespace · set up complete. Launching…\n`);
+}
+
 /** No token anywhere (env, .env, credential store) → run first-run onboarding instead of a hard exit. */
 function needsOnboarding() {
   if (process.env.PAGESPACE_AUTH_TOKEN && process.env.PAGESPACE_AUTH_TOKEN.trim()) return false;
@@ -365,10 +443,7 @@ if (sub === "status" || process.argv.includes("--check")) {
   loginCommand();
 } else if (needsOnboarding()) {
   // First run with no token: walk the user to a coding-ready state (Cursor-grade) instead of exiting.
-  process.stderr.write("pagespace · first run — let's get you set up.\n");
-  loginCommand();
-  // After login, the credential store is populated; relaunch so the provider picks up the token.
-  process.stderr.write("pagespace · launching…\n");
+  await runOnboarding();
   launchPi(process.argv.slice(2));
 } else {
   launchPi(process.argv.slice(2));
