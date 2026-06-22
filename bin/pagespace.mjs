@@ -28,8 +28,12 @@ if (!isTsx) {
 } else {
   // main() is called at the end of the file, after all declarations (avoids TDZ on consts).
 }
-// Shared pure modules — one implementation consumed by statusDoctor + onboarding + tests. No mirroring.
+// Shared pure modules — ONE implementation consumed by status + onboarding + login + tests.
+// No mirroring: every function below calls these, not a local copy.
 import { diagnose, formatDoctor } from "../src/doctor.ts";
+import { nextOnboardingStep, initialOnboardingState, onboardingNeedsSetup } from "../src/onboarding.ts";
+import { buildCredentialRecord, writeCredentials, readCredentials, credentialsPath } from "../src/credentials.ts";
+import { resolveDefaultDrive } from "../src/config.ts";
 
 // Resolve the pi CLI from the local workspace package rather than a global install.
 // Using a path-relative URL since dist/cli.js isn't in the package's exports map.
@@ -76,21 +80,18 @@ loadDotenv();
 // Load credentials from the store (~/.pagespace/credentials, 0600) if no token is set via env/.env.
 // The token enters the LAUNCHER's process.env here so loadConfig()/the provider can read it — but
 // launchPi() strips it before spawning pi (token isolation). So the agent never sees it.
+// Uses the shared readCredentials() from src/credentials.ts (enforces 0600, validates the record).
 (function loadCredentials() {
   if (process.env.PAGESPACE_AUTH_TOKEN && process.env.PAGESPACE_AUTH_TOKEN.trim()) return;
-  const credPath = path.join(os.homedir(), ".pagespace", "credentials");
   try {
-    if (!fs.existsSync(credPath)) return;
-    const stat = fs.statSync(credPath);
-    if (stat.mode & 0o077) {
-      console.error(`pagespace: ${credPath} is group/world readable (${(stat.mode & 0o777).toString(8)}); run: chmod 600 ${credPath}`);
-      process.exit(1);
+    const rec = readCredentials();
+    if (rec) {
+      process.env.PAGESPACE_AUTH_TOKEN = rec.token;
+      if (!process.env.PAGESPACE_API_URL) process.env.PAGESPACE_API_URL = rec.apiUrl;
     }
-    const rec = JSON.parse(fs.readFileSync(credPath, "utf8"));
-    if (rec.token) process.env.PAGESPACE_AUTH_TOKEN = rec.token;
-    if (!process.env.PAGESPACE_API_URL && rec.apiUrl) process.env.PAGESPACE_API_URL = rec.apiUrl;
-  } catch {
-    /* unreadable credential file — fall back to whatever env holds */
+  } catch (err) {
+    console.error(`pagespace: ${err.message}`);
+    process.exit(1);
   }
 })();
 
@@ -107,8 +108,7 @@ async function statusDoctor() {
   // Reusable doctor (src/doctor.ts): gathers inputs, calls diagnose(), prints structured results.
   // Non-interactive/CI-safe: never prompts; exit 1 on any failing check.
   const apiUrl = (process.env.PAGESPACE_API_URL || "https://pagespace.ai").replace(/\/$/, "");
-  const credPath = path.join(os.homedir(), ".pagespace", "credentials");
-  const hasCredentials = fs.existsSync(credPath);
+  const hasCredentials = fs.existsSync(credentialsPath());
   const hasToken = !!(process.env.PAGESPACE_AUTH_TOKEN && process.env.PAGESPACE_AUTH_TOKEN.trim());
   const token = process.env.PAGESPACE_AUTH_TOKEN;
 
@@ -350,39 +350,21 @@ async function loginCommand() {
     console.error(`pagespace: cannot reach ${apiUrl} to validate (${err.message}) — nothing saved.`);
     process.exit(1);
   }
-  // Build + write the record (buildCredentialRecord/parseCredentialRecord mirrored from src/credentials.ts).
-  const rec = { token, apiUrl, savedAt: new Date().toISOString() };
-  const dir = path.join(os.homedir(), ".pagespace");
-  const credPath = path.join(dir, "credentials");
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(credPath, JSON.stringify(rec, null, 2), { mode: 0o600 });
-  fs.chmodSync(credPath, 0o600);
+  // Build + write the record via the shared helpers (src/credentials.ts) — one impl, 0600 enforced.
+  const rec = buildCredentialRecord({ token, apiUrl });
+  const credPath = writeCredentials(rec);
   process.stderr.write(`pagespace · token saved to ${credPath} (0600). Run: pagespace status\n`);
 }
 
 // Drive the full first-run onboarding flow (token → validate → drives → models → default → materialize)
-// using the pure state machine in src/onboarding.ts (mirrored here). Each step performs its effect,
-// feeds the result into nextOnboardingStep, and loops until done. Materialize writes the chosen
-// defaults to the credential store + env so the provider picks them up on relaunch.
+// using the shared pure state machine (src/onboarding.ts nextOnboardingStep). Each step performs its
+// effect, feeds the result into nextOnboardingStep, and loops until done. No local state logic —
+// the machine is the single implementation the unit tests exercise. Materialize via shared helpers.
 async function runOnboarding() {
-  const STEP_ORDER = ["token", "validate", "drives", "models", "default", "done"];
-  let state = { step: "token", token: null, apiUrl: (process.env.PAGESPACE_API_URL || "https://pagespace.ai").replace(/\/$/, ""), drives: null, defaultDrive: null, models: null, defaultModel: null };
-
-  const advance = (input = {}) => {
-    const s = { ...state };
-    switch (s.step) {
-      case "token": { const t = (input.token ?? s.token ?? "").trim(); if (t) { s.token = t; s.step = "validate"; } break; }
-      case "validate": { if (input.validated) s.step = "drives"; else { s.step = "token"; s.token = null; } break; }
-      case "drives": { const d = input.drives; if (d && d.length) { s.drives = d; s.defaultDrive = d[0].slug; s.step = "models"; } break; }
-      case "models": { const m = input.models; if (m) { s.models = m; s.defaultModel = m[0] || null; } s.step = "default"; break; }
-      case "default": { s.step = "done"; break; }
-    }
-    state = s;
-  };
-
+  let state = initialOnboardingState();
   const base = (process.env.PAGESPACE_API_URL || "https://pagespace.ai").replace(/\/$/, "");
 
-  // STEP token: capture via loginCommand's prompt logic (reuse the capture+validate+persist).
+  // STEP token: capture.
   process.stderr.write("pagespace · first run — let's get you set up.\n");
   process.stderr.write("Paste your PageSpace token (input is hidden): ");
   const readline = await import("node:readline/promises");
@@ -390,13 +372,13 @@ async function runOnboarding() {
   let token;
   try { token = (await rl.question("")).trim(); } finally { rl.close(); }
   if (!token) { console.error("pagespace: no token entered — nothing saved."); process.exit(1); }
-  advance({ token });
+  state = nextOnboardingStep(state, { token });
 
   // STEP validate: auth ping.
   try {
     const res = await fetch(`${base}/api/drives`, { headers: { authorization: `Bearer ${token}` } });
     if (!res.ok) { console.error(`pagespace: token rejected by ${base} (HTTP ${res.status}).`); process.exit(1); }
-    advance({ validated: true });
+    state = nextOnboardingStep(state, { validated: true });
   } catch (err) {
     console.error(`pagespace: cannot reach ${base} (${err.message}).`);
     process.exit(1);
@@ -407,10 +389,10 @@ async function runOnboarding() {
   const drives = (Array.isArray(drivesRaw) ? drivesRaw : drivesRaw?.drives || []).map((d) => ({ id: d.id, name: d.name, slug: d.slug }));
   if (drives.length === 0) { console.error("pagespace: no drives accessible to this token."); process.exit(1); }
   console.log(`  ✓ discovered ${drives.length} drive(s): ${drives.map((d) => d.slug).join(", ")}`);
-  advance({ drives });
+  state = nextOnboardingStep(state, { drives });
 
-  // STEP models: discover agent pages across all drives (preferred drive first).
-  const preferred = state.defaultDrive;
+  // STEP models: discover agent pages across all drives (preferred/default drive first via config).
+  const preferred = resolveDefaultDrive(process.env) ?? state.defaultDrive;
   const ordered = [...drives].sort((a, b) => (a.slug === preferred ? -1 : b.slug === preferred ? 1 : 0));
   const modelRes = await Promise.allSettled(ordered.map((d) =>
     fetch(`${base}/api/drives/${d.id}/pages`, { headers: { authorization: `Bearer ${token}` } }).then((r) => r.json())
@@ -419,30 +401,28 @@ async function runOnboarding() {
   const walk = (nodes) => { for (const n of nodes) { if (n.type === "AI_CHAT") models.push({ id: n.id, name: n.title }); if (n.children) walk(n.children); } };
   for (const r of modelRes) if (r.status === "fulfilled" && Array.isArray(r.value)) walk(r.value);
   console.log(`  ✓ discovered ${models.length} agent model(s)${models.length ? ": " + models.map((m) => m.name).join(", ") : ""}`);
-  advance({ models });
+  state = nextOnboardingStep(state, { models });
 
-  // STEP default: choose first model (auto). STEP done: materialize.
-  advance();
+  // STEP default → done (the machine advances automatically; the default is the first discovered).
+  state = nextOnboardingStep(state);
 
-  // Materialize: persist token + chosen defaults to the credential store + env (token isolation holds).
-  const dir = path.join(os.homedir(), ".pagespace");
-  const credPath = path.join(dir, "credentials");
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(credPath, JSON.stringify({ token, apiUrl: base, savedAt: new Date().toISOString() }, null, 2), { mode: 0o600 });
-  fs.chmodSync(credPath, 0o600);
+  // Materialize: persist token to the credential store (shared writeCredentials). Set non-secret
+  // drive/model defaults in the launcher env. The token does NOT go into env here — loadCredentials()
+  // will read it from the store on the next launch (token isolation holds: no env round-trip).
+  const credPath = writeCredentials(buildCredentialRecord({ token, apiUrl: base }));
   if (state.defaultDrive) process.env.PAGESPACE_DRIVE = state.defaultDrive;
   if (state.defaultModel) process.env.PAGESPACE_MODEL_PAGE = state.defaultModel.id;
-  process.env.PAGESPACE_AUTH_TOKEN = token; // launcher env only — launchPi strips it before spawn
   console.log(`  ✓ default drive: ${state.defaultDrive || "(none)"}`);
   console.log(`  ✓ default model: ${state.defaultModel?.name || "(none)"} (${state.defaultModel?.id?.slice(0, 8) || ""})`);
-  process.stderr.write(`pagespace · set up complete. Launching…\n`);
+  process.stderr.write(`pagespace · set up complete (${credPath}, 0600). Launching…\n`);
 }
 
-/** No token anywhere (env, .env, credential store) → run first-run onboarding instead of a hard exit. */
+/** No token anywhere (env, .env, credential store) → run first-run onboarding instead of a hard exit.
+ * Uses the shared onboardingNeedsSetup() (src/onboarding.ts → diagnose()) — single decision path. */
 function needsOnboarding() {
-  if (process.env.PAGESPACE_AUTH_TOKEN && process.env.PAGESPACE_AUTH_TOKEN.trim()) return false;
-  const credPath = path.join(os.homedir(), ".pagespace", "credentials");
-  return !fs.existsSync(credPath);
+  const hasToken = !!(process.env.PAGESPACE_AUTH_TOKEN && process.env.PAGESPACE_AUTH_TOKEN.trim());
+  const hasCredentials = fs.existsSync(credentialsPath());
+  return onboardingNeedsSetup({ hasToken, hasCredentials });
 }
 
 async function main() {
