@@ -1,4 +1,4 @@
-import { readCredentials, type CredentialRecord } from "./credentials.ts";
+import { readCredentials, type CredentialRecord, DEFAULT_API_URL } from "./credentials.ts";
 
 /** Runtime configuration for the PageSpace companion, resolved from env. */
 export interface PageSpaceConfig {
@@ -86,9 +86,9 @@ export function loadConfig(
   const modelPageId = ids[0];
 
   return {
-    apiUrl: env.PAGESPACE_API_URL ?? "https://pagespace.ai",
+    apiUrl: env.PAGESPACE_API_URL ?? DEFAULT_API_URL,
     authToken: resolveAuthToken(env, readCredential),
-    defaultDriveSlug: resolveDefaultDrive(env) ?? env.PAGESPACE_DRIVE,
+    defaultDriveSlug: resolveDefaultDrive(env),
     mountPrefix: env.PAGESPACE_MOUNT ?? "pagespace",
     modelPageId,
     models: ids.length > 0 ? ids.map((id) => ({ id })) : undefined,

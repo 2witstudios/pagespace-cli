@@ -34,6 +34,7 @@ import { diagnose, formatDoctor } from "../src/doctor.ts";
 import { nextOnboardingStep, initialOnboardingState, onboardingNeedsSetup } from "../src/onboarding.ts";
 import { buildCredentialRecord, writeCredentials, readCredentials, credentialsPath } from "../src/credentials.ts";
 import { resolveDefaultDrive, resolveAuthToken } from "../src/config.ts";
+import { sanitizeChildEnv, SECRET_ENV_KEYS } from "../src/env.ts";
 
 // Resolve the pi CLI from the local workspace package rather than a global install.
 // Using a path-relative URL since dist/cli.js isn't in the package's exports map.
@@ -96,14 +97,7 @@ loadDotenv();
 })();
 
 // Secret env keys stripped from the spawned pi process so pi's bash tool can never read them
-// (token isolation — the agent must never see the PageSpace auth token). Mirrors src/env.ts.
-const SECRET_ENV_KEYS = ["PAGESPACE_AUTH_TOKEN"];
-function sanitizeChildEnv(env) {
-  const out = { ...env };
-  for (const key of SECRET_ENV_KEYS) delete out[key];
-  return out;
-}
-
+// (token isolation — the agent must never see the PageSpace auth token). Shared via src/env.ts.
 async function statusDoctor() {
   // Reusable doctor (src/doctor.ts): gathers inputs, calls diagnose(), prints structured results.
   // Non-interactive/CI-safe: never prompts; exit 1 on any failing check.

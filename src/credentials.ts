@@ -31,9 +31,11 @@ export function buildCredentialRecord(input: {
   now?: () => Date;
 }): CredentialRecord {
   if (!input.token || !input.token.trim()) throw new Error("token is required");
+  const apiUrl = (input.apiUrl ?? DEFAULT_API_URL).trim();
+  if (!apiUrl) throw new Error("apiUrl is empty");
   return {
     token: input.token.trim(),
-    apiUrl: (input.apiUrl ?? DEFAULT_API_URL).trim(),
+    apiUrl,
     savedAt: (input.now ?? (() => new Date()))().toISOString(),
   };
 }
@@ -58,10 +60,10 @@ export function parseCredentialRecord(body: string): CredentialRecord {
 /** Validate a candidate credential record; returns a list of human-readable errors. Pure. */
 export function validateCredentialRecord(rec: Partial<CredentialRecord>): string[] {
   const errs: string[] = [];
-  if (!rec.token || !rec.token.trim()) errs.push("token is missing");
-  if (!rec.apiUrl || !rec.apiUrl.trim()) errs.push("apiUrl is missing");
+  if (typeof rec.token !== "string" || !rec.token.trim()) errs.push("token is missing");
+  if (typeof rec.apiUrl !== "string" || !rec.apiUrl.trim()) errs.push("apiUrl is missing");
   else if (!/^https?:\/\//.test(rec.apiUrl)) errs.push("apiUrl must be an http(s) URL");
-  if (!rec.savedAt || !rec.savedAt.trim()) errs.push("savedAt is missing");
+  if (typeof rec.savedAt !== "string" || !rec.savedAt.trim()) errs.push("savedAt is missing");
   return errs;
 }
 

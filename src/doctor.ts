@@ -6,6 +6,7 @@
  * (token present? credential store present? reachable?) and calls these. Non-interactive/CI-safe:
  * `diagnose` is pure — it never prompts or blocks, just reports.
  */
+import { DEFAULT_API_URL } from "./credentials.ts";
 
 /** A single diagnostic check. */
 export interface DoctorCheck {
@@ -45,8 +46,6 @@ export interface DoctorResult {
   /** Top-level remediation summary (the first failing check's action, or "" when all pass). */
   remediation: string;
 }
-
-const DEFAULT_API_URL = "https://pagespace.ai";
 
 /**
  * Run the diagnostic checks against a config snapshot. Pure: decides pass/fail + remediation per

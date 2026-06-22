@@ -40,3 +40,8 @@ test("loadConfig: env token wins over credential store token", () => {
   );
   assert.equal(config.authToken, "mcp_env_token");
 });
+
+test("loadConfig: whitespace-only PAGESPACE_DRIVE does not leak into defaultDriveSlug", () => {
+  const config = loadConfig({ PAGESPACE_DRIVE: "   " }, () => null);
+  assert.equal(config.defaultDriveSlug, undefined);
+});

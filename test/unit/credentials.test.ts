@@ -5,6 +5,7 @@ import {
   parseCredentialRecord,
   credentialRecordShape,
   validateCredentialRecord,
+  type CredentialRecord,
 } from "../../src/credentials.ts";
 
 test("buildCredentialRecord shapes a token + metadata into the stored record", () => {
@@ -45,6 +46,32 @@ test("validateCredentialRecord flags a missing token", () => {
 test("validateCredentialRecord flags a missing apiUrl", () => {
   const errs = validateCredentialRecord({ token: "mcp_abc", savedAt: "x" });
   assert.ok(errs.some((e) => /apiUrl|api url|url/i.test(e)));
+});
+
+test("validateCredentialRecord rejects non-string field values (e.g. numeric token)", () => {
+  const rec = {
+    token: 123,
+    apiUrl: "https://pagespace.ai",
+    savedAt: "x",
+  } as unknown as Partial<CredentialRecord>;
+  const errs = validateCredentialRecord(rec);
+  assert.ok(
+    errs.some((e) => /token/i.test(e)),
+    "numeric token should be flagged, not crash",
+  );
+});
+
+test("validateCredentialRecord rejects non-string apiUrl", () => {
+  const rec = { token: "mcp_abc", apiUrl: 42, savedAt: "x" } as unknown as Partial<CredentialRecord>;
+  const errs = validateCredentialRecord(rec);
+  assert.ok(
+    errs.some((e) => /apiUrl|api url|url/i.test(e)),
+    "numeric apiUrl should be flagged",
+  );
+});
+
+test("buildCredentialRecord rejects whitespace-only apiUrl", () => {
+  assert.throws(() => buildCredentialRecord({ token: "mcp_abc", apiUrl: "   " }), /apiUrl|url/i);
 });
 
 test("credentialRecordShape is the canonical key list", () => {

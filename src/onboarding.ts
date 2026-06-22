@@ -109,11 +109,12 @@ export function nextOnboardingStep(state: OnboardingState, input: OnboardingInpu
         next.models = models;
         next.defaultModel = models[0]; // default to the first discovered model
         next.step = "default";
-      } else {
-        // No models found is recoverable (model-discovery is optional in some setups) — go done.
+      } else if (models !== undefined) {
+        // Explicit empty discovery is recoverable (model-discovery is optional in some setups) — go default.
         next.models = [];
         next.step = "default";
       }
+      // models === undefined: hold — discovery hasn't run yet; wait for a real result.
       break;
     }
     case "default": {

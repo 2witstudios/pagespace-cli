@@ -71,6 +71,18 @@ test("nextOnboardingStep advances models→default when models discovered", () =
   assert.deepEqual(out.defaultModel, { id: "m1", name: "Brain" }, "defaults to first model");
 });
 
+test("nextOnboardingStep holds at models when input.models is undefined (no discovery yet)", () => {
+  const s: OnboardingState = { ...base, token: "mcp_abc", defaultDrive: "a", step: "models" };
+  const out = nextOnboardingStep(s, {});
+  assert.equal(out.step, "models", "should hold when models discovery hasn't happened");
+});
+
+test("nextOnboardingStep advances models→default when discovery returns empty (recoverable)", () => {
+  const s: OnboardingState = { ...base, token: "mcp_abc", defaultDrive: "a", step: "models" };
+  const out = nextOnboardingStep(s, { models: [] });
+  assert.equal(out.step, "default", "empty discovery is recoverable — advance");
+});
+
 test("nextOnboardingStep advances default→done when a default model is chosen", () => {
   const s: OnboardingState = {
     ...base,
