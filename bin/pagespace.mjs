@@ -33,7 +33,7 @@ if (!isTsx) {
 import { diagnose, formatDoctor } from "../src/doctor.ts";
 import { nextOnboardingStep, initialOnboardingState, onboardingNeedsSetup } from "../src/onboarding.ts";
 import { buildCredentialRecord, writeCredentials, readCredentials, credentialsPath } from "../src/credentials.ts";
-import { resolveDefaultDrive } from "../src/config.ts";
+import { resolveDefaultDrive, resolveAuthToken } from "../src/config.ts";
 
 // Resolve the pi CLI from the local workspace package rather than a global install.
 // Using a path-relative URL since dist/cli.js isn't in the package's exports map.
@@ -109,12 +109,18 @@ async function statusDoctor() {
   // Non-interactive/CI-safe: never prompts; exit 1 on any failing check.
   const apiUrl = (process.env.PAGESPACE_API_URL || "https://pagespace.ai").replace(/\/$/, "");
   const hasCredentials = fs.existsSync(credentialsPath());
-  const hasToken = !!(process.env.PAGESPACE_AUTH_TOKEN && process.env.PAGESPACE_AUTH_TOKEN.trim());
-  const token = process.env.PAGESPACE_AUTH_TOKEN;
+  const token = resolveAuthToken(process.env, () => {
+    try {
+      return readCredentials();
+    } catch {
+      return null;
+    }
+  });
+  const hasToken = !!(token && token.trim());
 
   let reachable;
   let driveCount;
-  if (hasToken || hasCredentials) {
+  if (hasToken) {
     try {
       const res = await fetch(`${apiUrl}/api/drives`, { headers: { authorization: `Bearer ${token}` } });
       reachable = res.ok;
@@ -437,22 +443,22 @@ function needsOnboarding() {
 }
 
 async function main() {
-const sub = process.argv[2];
-if (sub === "status" || process.argv.includes("--check")) {
-  statusDoctor();
-} else if (sub === "sessions") {
-  sessionsCommand();
-} else if (sub === "resume") {
-  resumeCommand(process.argv[3], process.argv.slice(4));
-} else if (sub === "login") {
-  loginCommand();
-} else if (needsOnboarding()) {
-  // First run with no token: walk the user to a coding-ready state (Cursor-grade) instead of exiting.
-  await runOnboarding();
-  launchPi(process.argv.slice(2));
-} else {
-  launchPi(process.argv.slice(2));
-}
+  const sub = process.argv[2];
+  if (sub === "status" || process.argv.includes("--check")) {
+    statusDoctor();
+  } else if (sub === "sessions") {
+    sessionsCommand();
+  } else if (sub === "resume") {
+    resumeCommand(process.argv[3], process.argv.slice(4));
+  } else if (sub === "login") {
+    loginCommand();
+  } else if (needsOnboarding()) {
+    // First run with no token: walk the user to a coding-ready state (Cursor-grade) instead of exiting.
+    await runOnboarding();
+    launchPi(process.argv.slice(2));
+  } else {
+    launchPi(process.argv.slice(2));
+  }
 }
 
 // Entry point — run after all declarations are initialized (avoids TDZ on module-level consts).
