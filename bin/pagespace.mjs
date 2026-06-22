@@ -50,6 +50,15 @@ function loadDotenv(startDir = process.cwd()) {
 }
 loadDotenv();
 
+// Secret env keys stripped from the spawned pi process so pi's bash tool can never read them
+// (token isolation — the agent must never see the PageSpace auth token). Mirrors src/env.ts.
+const SECRET_ENV_KEYS = ["PAGESPACE_AUTH_TOKEN"];
+function sanitizeChildEnv(env) {
+  const out = { ...env };
+  for (const key of SECRET_ENV_KEYS) delete out[key];
+  return out;
+}
+
 const CONFIG_KEYS = [
   ["PAGESPACE_AUTH_TOKEN", true, "scoped MCP token (Bearer)"],
   ["PAGESPACE_API_URL", false, "instance URL (default https://pagespace.ai)"],
@@ -119,9 +128,15 @@ function launchPi(passthrough) {
     passthrough.includes("--no-skills") || passthrough.includes("-ns") || passthrough.includes("--skill")
       ? []
       : ["--no-skills"];
+  // Spawn pi with a SANITIZED env: strip secret keys (PAGESPACE_AUTH_TOKEN) so pi's bash tool and
+  // any subprocess can NEVER read them via env/printenv/procfs. The provider reads the token from
+  // config (not the child env) — token isolation (security ADR: agent must never see the token).
+  const childEnv = sanitizeChildEnv(process.env);
+  childEnv.PI_SKIP_VERSION_CHECK = "1";
+  childEnv.PI_CODING_AGENT_DIR = PAGESPACE_AGENT_DIR;
   const child = spawn(process.execPath, [PI_CLI, "-e", extensionPath, ...noSkillsFlag, ...passthrough], {
     stdio: "inherit",
-    env: { ...process.env, PI_SKIP_VERSION_CHECK: "1", PI_CODING_AGENT_DIR: PAGESPACE_AGENT_DIR },
+    env: childEnv,
   });
   child.on("error", (err) => {
     console.error(`pagespace: failed to launch (${err.message}).`);
