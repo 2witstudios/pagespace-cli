@@ -28,6 +28,40 @@ export interface PageSpaceConfig {
   conversationId?: string;
 }
 
+/**
+ * Parse a drive set from env: PAGESPACE_DRIVES (comma-separated, the accessible drives) merged with
+ * PAGESPACE_DRIVE (the bare-path default, kept first + deduped). Returns {drives, default}. Pure.
+ *
+ * `default` is what the dual-mount uses for bare paths (pagespace/... with no drive segment);
+ * `drives` is the declared set the harness is aware of. A single PAGESPACE_DRIVE still works (the
+ * common case) — it becomes a one-element set with itself as the default.
+ */
+export function parseDriveSet(env: {
+  PAGESPACE_DRIVE?: string;
+  PAGESPACE_DRIVES?: string;
+}): { drives: string[]; default: string | undefined } {
+  const single = env.PAGESPACE_DRIVE?.trim();
+  const list = (env.PAGESPACE_DRIVES ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const drives = [...new Set([...(single ? [single] : []), ...list])];
+  return { drives, default: resolveDefaultDrive(env) };
+}
+
+/** Resolve the bare-path default drive: PAGESPACE_DRIVE wins, else the first of PAGESPACE_DRIVES. Pure. */
+export function resolveDefaultDrive(env: {
+  PAGESPACE_DRIVE?: string;
+  PAGESPACE_DRIVES?: string;
+}): string | undefined {
+  const single = env.PAGESPACE_DRIVE?.trim();
+  if (single) return single;
+  return (env.PAGESPACE_DRIVES ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .find(Boolean);
+}
+
 export function loadConfig(): PageSpaceConfig {
   const configuredPrimary = process.env.PAGESPACE_MODEL_PAGE?.trim();
   const modelPageIds = (process.env.PAGESPACE_MODEL_PAGES ?? "")
@@ -40,7 +74,7 @@ export function loadConfig(): PageSpaceConfig {
   return {
     apiUrl: process.env.PAGESPACE_API_URL ?? "https://pagespace.ai",
     authToken: process.env.PAGESPACE_AUTH_TOKEN,
-    defaultDriveSlug: process.env.PAGESPACE_DRIVE,
+    defaultDriveSlug: resolveDefaultDrive(process.env) ?? process.env.PAGESPACE_DRIVE,
     mountPrefix: process.env.PAGESPACE_MOUNT ?? "pagespace",
     modelPageId,
     models: ids.length > 0 ? ids.map((id) => ({ id })) : undefined,
