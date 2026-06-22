@@ -1,12 +1,35 @@
 #!/usr/bin/env node
 // Branded `pagespace` launcher. `pagespace status` runs a config/auth doctor; anything else starts
-// pi with this package's extension preloaded and passes args through. Mirrors src/cli.ts
-// (buildPiLaunchArgs/resolveExtensionPath/checkConfig — kept in TS for unit tests).
+// pi with this package's extension preloaded and passes args through.
+//
+// Runtime: re-exec under tsx so the bin can import the shared TS source (src/doctor.ts etc.) —
+// one implementation consumed by status, onboarding, and the unit tests (no mirroring). The preamble
+// below detects plain node and re-spawns under tsx transparently.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+// Re-exec under tsx if running under plain node (so TS imports resolve on any Node version).
+// The parent spawns the child under tsx and exits; the child (PAGESPACE_UNDER_TSX=1) runs main().
+const isTsx = process.execArgv.some((a) => a.includes("tsx")) || !!process.env.PAGESPACE_UNDER_TSX;
+if (!isTsx) {
+  const bin = fileURLToPath(import.meta.url);
+  const tsxPath = path.join(path.dirname(bin), "..", "node_modules", ".bin", "tsx");
+  const child = spawn(process.execPath, [tsxPath, bin, ...process.argv.slice(2)], {
+    stdio: "inherit",
+    env: { ...process.env, PAGESPACE_UNDER_TSX: "1" },
+  });
+  child.on("exit", (code, signal) => {
+    if (signal) process.kill(process.pid, signal);
+    else process.exit(code ?? 0);
+  });
+} else {
+  main();
+}
+// Shared pure modules — one implementation consumed by statusDoctor + onboarding + tests. No mirroring.
+import { diagnose, formatDoctor } from "../src/doctor.ts";
 
 // Resolve the pi CLI from the local workspace package rather than a global install.
 // Using a path-relative URL since dist/cli.js isn't in the package's exports map.
@@ -104,23 +127,11 @@ async function statusDoctor() {
     }
   }
 
-  // diagnose() is pure (src/doctor.ts) — mirrored here as the launcher can't import TS.
-  const checks = [];
-  checks.push({ id: "apiUrl", label: "API URL", pass: /^https?:\/\//.test(apiUrl), detail: apiUrl, remediation: "set PAGESPACE_API_URL to an http(s) URL." });
-  checks.push({ id: "token", label: "Auth token", pass: !!(hasToken || hasCredentials), detail: (hasToken || hasCredentials) ? "present" : "unset", remediation: "run: pagespace login  (or export PAGESPACE_AUTH_TOKEN)." });
-  checks.push({ id: "credentials", label: "Credential store", pass: hasCredentials, detail: hasCredentials ? "present (~/.pagespace/credentials)" : "not set", remediation: "run: pagespace login  to persist a token (0600)." });
-  if (reachable !== undefined) checks.push({ id: "reachable", label: "Reachable", pass: reachable, detail: reachable ? `${apiUrl} — ${driveCount ?? "?"} drive(s) visible` : `cannot reach ${apiUrl}`, remediation: `check network/URL/token scope against ${apiUrl}.` });
-  const pass = checks.every((c) => c.pass);
-
-  console.log("pagespace status:");
-  for (const c of checks) console.log(`  ${c.pass ? "✓" : "✗"} ${c.label}: ${c.detail}`);
-  const failing = checks.filter((c) => !c.pass);
-  if (failing.length > 0) {
-    console.log("  → fix:");
-    for (const c of failing) console.log(`    ${c.remediation}`);
-    process.exit(1);
-  }
-  console.log("  → all checks passed.");
+  // diagnose() + formatDoctor() are the shared pure doctor (src/doctor.ts) — same impl the unit
+  // tests and onboarding consume. No mirroring. Non-interactive/CI-safe: exit 1 on any failing check.
+  const result = diagnose({ apiUrl, hasToken, hasCredentials, reachable, driveCount });
+  console.log(formatDoctor(result));
+  if (!result.pass) process.exit(1);
 }
 
 // Launch pi with the extension preloaded + --no-skills (skills are registered as /name extension
@@ -434,6 +445,7 @@ function needsOnboarding() {
   return !fs.existsSync(credPath);
 }
 
+async function main() {
 const sub = process.argv[2];
 if (sub === "status" || process.argv.includes("--check")) {
   statusDoctor();
@@ -449,4 +461,5 @@ if (sub === "status" || process.argv.includes("--check")) {
   launchPi(process.argv.slice(2));
 } else {
   launchPi(process.argv.slice(2));
+}
 }
