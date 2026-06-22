@@ -15,6 +15,26 @@ import fs from "node:fs";
 import path from "node:path";
 
 /**
+ * Env keys that carry a secret and must NEVER be inherited by a spawned child (e.g. pi) whose
+ * tools (bash) could otherwise read them via `env`/`printenv`/`/proc/self/environ`. Token
+ * isolation: the agent must never see the PageSpace auth token. The provider reads the token
+ * from config, not from the child's process env.
+ */
+export const SECRET_ENV_KEYS = ["PAGESPACE_AUTH_TOKEN"] as const;
+
+/**
+ * Return a copy of `env` with all secret-bearing keys removed — safe to pass to `spawn` so a child
+ * process (and its tools) cannot exfiltrate the auth token. Non-mutating. Pure.
+ */
+export function sanitizeChildEnv(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = { ...env };
+  for (const key of SECRET_ENV_KEYS) delete out[key];
+  return out;
+}
+
+/**
  * Parse a dotenv-style file body into key/value pairs. Pure.
  * Skips blanks and `#` comments, tolerates a leading `export `, strips one layer of matching
  * single/double quotes, and ignores inline `#` comments on unquoted values. Last value wins.
@@ -47,6 +67,7 @@ export function parseEnvFile(body: string): Record<string, string> {
 export function applyEnv(parsed: Record<string, string>, env: NodeJS.ProcessEnv = process.env): string[] {
   const applied: string[] = [];
   for (const [k, v] of Object.entries(parsed)) {
+    if (SECRET_ENV_KEYS.includes(k as (typeof SECRET_ENV_KEYS)[number])) continue;
     if (env[k] === undefined || env[k] === "") {
       env[k] = v;
       applied.push(k);

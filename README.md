@@ -38,41 +38,48 @@
 ```bash
 git clone https://github.com/2witstudios/pagespace-cli.git
 cd pagespace-cli
-npm install
+npm install          # resolves vendored pi workspaces in packages/
+npm run build        # required: builds workspace pi packages to dist/ (~3s)
 ```
 
-`npm install` resolves the vendored pi workspaces in this monorepo (`packages/pi-agent-core`, `packages/pi-ai`, `packages/pi-coding-agent`, `packages/pi-tui`). You do **not** need a global `@earendil-works/pi-coding-agent` install.
-
-Create local config (recommended):
-
-```bash
-cp .env.example .env.local
-# then edit .env.local and set at least PAGESPACE_AUTH_TOKEN
-```
+This repo vendors pi via npm workspaces (`packages/`), so you do **not** need a global pi install.
 
 Launch either way:
 
 ```bash
-npm link
+npm link             # optional: puts `pagespace` on your PATH
 pagespace
 
 # or without linking
 node bin/pagespace.mjs
 ```
 
-Run the doctor:
+### First run (Cursor-grade onboarding)
 
-```bash
-pagespace status
-```
+If no token is configured, `pagespace` now runs an interactive onboarding flow instead of exiting:
+
+- prompts you to paste a token
+- validates auth (`GET /api/drives`)
+- discovers accessible drives (preferred drive first)
+- discovers available AI_CHAT agent models across drives
+- defaults drive/model to the first discovered option
+- writes credentials + selection, then launches
+
+Materialized config on successful onboarding:
+
+- `~/.pagespace/credentials` (token, mode `0600`)
+- chosen default drive/model
+
+Happy path is now: **install → run → onboard → code**.
 
 ## Commands
 
 ```bash
-pagespace                    # start the harness
-pagespace status             # env + connectivity doctor
-pagespace sessions           # list conversations for PAGESPACE_MODEL_PAGE
-pagespace resume <id>        # resume by exact id or unique prefix
+pagespace              # start (runs onboarding on first run if no token)
+pagespace status       # config + auth doctor (credential store + structured ✓/✗)
+pagespace login        # capture/refresh token into ~/.pagespace/credentials (0600)
+pagespace sessions     # list synced conversations
+pagespace resume <id>  # resume a conversation
 ```
 
 In-session model switching:
@@ -82,56 +89,52 @@ In-session model switching:
 
 ## Configuration
 
-### Environment variables
+Token/config can come from several sources. Default UX is the credential store; override paths still work for those who need them.
 
-By default, launcher/extension load `.env.local` then `.env` (shell env still wins). Configure with:
+1. **Credential store (recommended):** `~/.pagespace/credentials` (mode `0600`). Written by first-run onboarding or `pagespace login`. Global across projects.
+2. **Project env files (optional override):** `.env.local` then `.env`, auto-loaded by the launcher.
+3. **`.mcp.json` (optional override, MCP workflows):** holds the token for MCP-server workflows (see `.mcp.json.example`). Not required for the harness itself — `pagespace` reads from the credential store / env, not `.mcp.json`.
+4. **Shell env (highest precedence):** exported env vars always win at runtime.
+
+Effective precedence is: **shell env > `.env.local`/`.env` > credential store**. (`.mcp.json` is consumed by MCP clients, not the launcher's token resolution.)
+
+### Environment variables
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `PAGESPACE_AUTH_TOKEN` | **Yes** | Scoped PageSpace token for API access. |
+| `PAGESPACE_AUTH_TOKEN` | No | Scoped token. **Now optional** (recommended to set via `pagespace login` / onboarding). |
 | `PAGESPACE_API_URL` | No | PageSpace base URL. Default: `https://pagespace.ai`. |
-| `PAGESPACE_DRIVE` | No | Default drive slug used for mount + memory grounding order. |
+| `PAGESPACE_DRIVE` | No | Default drive slug for bare mount paths. |
 | `PAGESPACE_MOUNT` | No | Mount prefix in your cwd. Default: `pagespace`. |
-| `PAGESPACE_MODEL_PAGE` | No | Optional primary brain agent page id (pin first model). |
-| `PAGESPACE_MODEL_PAGES` | No | Optional comma-separated additional agent page ids. |
+| `PAGESPACE_MODEL_PAGE` | No | Optional primary model page pin. |
+| `PAGESPACE_MODEL_PAGES` | No | Optional comma-separated model page pins. |
 | `PAGESPACE_READONLY` | No | Optional comma-separated mounted prefixes to protect from write/edit (e.g. `Specs,Epics`). |
 
-### Auto-discovery first, pinning optional
+### Models: auto-discovery by default
 
-If `PAGESPACE_MODEL_PAGES` is not set, the extension auto-discovers model agents across all accessible drives and registers them under provider `pagespace`.
+If model pins are not set, `pagespace` auto-discovers AI_CHAT agent models across all drives accessible to your token (preferred drive first).
 
-Use `PAGESPACE_MODEL_PAGE` / `PAGESPACE_MODEL_PAGES` only when you want to pin or extend the model list explicitly.
+Use `PAGESPACE_MODEL_PAGE` / `PAGESPACE_MODEL_PAGES` only when you want explicit pinning.
 
-### `.env.local` vs `.mcp.json`
+### Security note
 
-These are separate configuration paths:
-
-- **`.env.local` / `.env`**: consumed directly by `pagespace` launcher + extension runtime.
-- **`.mcp.json`** (gitignored): MCP server config format (see `.mcp.json.example`) that can also hold the same token for MCP workflows.
-
-`pagespace status` will suggest `.mcp.json.example` when required env is missing, but runtime behavior is still based on process env.
+The launcher strips auth token env before spawning pi. That means the agent's `bash` tool cannot read your token via `env`, `printenv`, or `/proc/self/environ`. Provider auth reads from config/credential storage, not child process env.
 
 ## How it works
 
-### 1) Dual-mount files
+### 1) Dual-mount filesystem
 
-`extensions/pagespace.ts` replaces file tools with path-aware routers:
+- Paths under `pagespace/<drive>/...` route to PageSpace pages.
+- Everything outside that mount stays on your local filesystem.
+- `bash` always runs locally.
 
-- under mounted PageSpace path: operate on PageSpace pages via API
-- outside mount: use local filesystem tools
-- `grep` on mounted paths uses server-side regex search
-- `bash` remains local-only
+### 2) PageSpace brain
 
-### 2) PageSpace as model brain
+- Uses native function-calling via `POST /api/v1/chat/completions`.
+- Targets `model: ps-agent://<pageId>`.
+- Sends pi tools with `disable_server_tools: true`, keeping the tool loop in pi.
 
-`src/provider.ts` registers provider `pagespace` and calls:
-
-- `POST /api/v1/chat/completions`
-- `model: ps-agent://<pageId>`
-- includes pi-native `tools`
-- `disable_server_tools: true`
-
-The model streams native `tool_calls`; pi executes those tools locally and returns tool results in the next turn. No text tool shim.
+This keeps the two axes explicit: **PageSpace-backed mounted memory/files + local code execution**.
 
 ## Architecture (condensed)
 

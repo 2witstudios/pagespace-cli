@@ -1,12 +1,40 @@
 #!/usr/bin/env node
 // Branded `pagespace` launcher. `pagespace status` runs a config/auth doctor; anything else starts
-// pi with this package's extension preloaded and passes args through. Mirrors src/cli.ts
-// (buildPiLaunchArgs/resolveExtensionPath/checkConfig — kept in TS for unit tests).
+// pi with this package's extension preloaded and passes args through.
+//
+// Runtime: re-exec under tsx so the bin can import the shared TS source (src/doctor.ts etc.) —
+// one implementation consumed by status, onboarding, and the unit tests (no mirroring). The preamble
+// below detects plain node and re-spawns under tsx transparently.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+// Re-exec under tsx if running under plain node (so TS imports resolve on any Node version).
+// The parent spawns the child under tsx and exits; the child (PAGESPACE_UNDER_TSX=1) runs main().
+const isTsx = process.execArgv.some((a) => a.includes("tsx")) || !!process.env.PAGESPACE_UNDER_TSX;
+if (!isTsx) {
+  const bin = fileURLToPath(import.meta.url);
+  const tsxPath = path.join(path.dirname(bin), "..", "node_modules", ".bin", "tsx");
+  const child = spawn(process.execPath, [tsxPath, bin, ...process.argv.slice(2)], {
+    stdio: "inherit",
+    env: { ...process.env, PAGESPACE_UNDER_TSX: "1" },
+  });
+  child.on("exit", (code, signal) => {
+    if (signal) process.kill(process.pid, signal);
+    else process.exit(code ?? 0);
+  });
+} else {
+  // main() is called at the end of the file, after all declarations (avoids TDZ on consts).
+}
+// Shared pure modules — ONE implementation consumed by status + onboarding + login + tests.
+// No mirroring: every function below calls these, not a local copy.
+import { diagnose, formatDoctor } from "../src/doctor.ts";
+import { nextOnboardingStep, initialOnboardingState, onboardingNeedsSetup } from "../src/onboarding.ts";
+import { buildCredentialRecord, writeCredentials, readCredentials, credentialsPath } from "../src/credentials.ts";
+import { resolveDefaultDrive, resolveAuthToken } from "../src/config.ts";
+import { sanitizeChildEnv, SECRET_ENV_KEYS } from "../src/env.ts";
 
 // Resolve the pi CLI from the local workspace package rather than a global install.
 // Using a path-relative URL since dist/cli.js isn't in the package's exports map.
@@ -50,41 +78,60 @@ function loadDotenv(startDir = process.cwd()) {
 }
 loadDotenv();
 
-const CONFIG_KEYS = [
-  ["PAGESPACE_AUTH_TOKEN", true, "scoped MCP token (Bearer)"],
-  ["PAGESPACE_API_URL", false, "instance URL (default https://pagespace.ai)"],
-  ["PAGESPACE_DRIVE", false, "default drive slug (mount + memory)"],
-  ["PAGESPACE_MODEL_PAGE", false, "brain agent page id (ps-agent://<id>)"],
-  ["PAGESPACE_MODEL_PAGES", false, "comma-separated brain agent ids for /model toggling"],
-];
-
-async function statusDoctor() {
-  console.log("pagespace config:");
-  let missingRequired = false;
-  for (const [key, required, label] of CONFIG_KEYS) {
-    const set = !!(process.env[key] && process.env[key].trim());
-    if (!set && required) missingRequired = true;
-    console.log(`  ${set ? "✓" : required ? "✗" : "·"} ${key}${set ? "" : ` (unset — ${label})`}`);
-  }
-  if (missingRequired) {
-    console.log("  → copy .mcp.json.example to .mcp.json and set your token, or export the env vars.");
-    process.exit(1);
-  }
-  const url = (process.env.PAGESPACE_API_URL || "https://pagespace.ai").replace(/\/$/, "");
-  const token = process.env.PAGESPACE_AUTH_TOKEN;
+// Load credentials from the store (~/.pagespace/credentials, 0600) if no token is set via env/.env.
+// The token enters the LAUNCHER's process.env here so loadConfig()/the provider can read it — but
+// launchPi() strips it before spawning pi (token isolation). So the agent never sees it.
+// Uses the shared readCredentials() from src/credentials.ts (enforces 0600, validates the record).
+(function loadCredentials() {
+  if (process.env.PAGESPACE_AUTH_TOKEN && process.env.PAGESPACE_AUTH_TOKEN.trim()) return;
   try {
-    const res = await fetch(`${url}/api/drives`, { headers: { authorization: `Bearer ${token}` } });
-    if (!res.ok) {
-      console.log(`  ✗ auth ping ${url}: HTTP ${res.status} — check the token/permissions.`);
-      process.exit(1);
+    const rec = readCredentials();
+    if (rec) {
+      process.env.PAGESPACE_AUTH_TOKEN = rec.token;
+      if (!process.env.PAGESPACE_API_URL) process.env.PAGESPACE_API_URL = rec.apiUrl;
     }
-    const data = await res.json().catch(() => []);
-    const n = Array.isArray(data) ? data.length : Array.isArray(data?.drives) ? data.drives.length : "?";
-    console.log(`  ✓ reachable: ${url} — ${n} drive(s) visible to this token.`);
   } catch (err) {
-    console.log(`  ✗ cannot reach ${url}: ${err.message}`);
+    console.error(`pagespace: ${err.message}`);
     process.exit(1);
   }
+})();
+
+// Secret env keys stripped from the spawned pi process so pi's bash tool can never read them
+// (token isolation — the agent must never see the PageSpace auth token). Shared via src/env.ts.
+async function statusDoctor() {
+  // Reusable doctor (src/doctor.ts): gathers inputs, calls diagnose(), prints structured results.
+  // Non-interactive/CI-safe: never prompts; exit 1 on any failing check.
+  const apiUrl = (process.env.PAGESPACE_API_URL || "https://pagespace.ai").replace(/\/$/, "");
+  const hasCredentials = fs.existsSync(credentialsPath());
+  const token = resolveAuthToken(process.env, () => {
+    try {
+      return readCredentials();
+    } catch {
+      return null;
+    }
+  });
+  const hasToken = !!(token && token.trim());
+
+  let reachable;
+  let driveCount;
+  if (hasToken) {
+    try {
+      const res = await fetch(`${apiUrl}/api/drives`, { headers: { authorization: `Bearer ${token}` } });
+      reachable = res.ok;
+      if (res.ok) {
+        const data = await res.json().catch(() => []);
+        driveCount = Array.isArray(data) ? data.length : Array.isArray(data?.drives) ? data.drives.length : 0;
+      }
+    } catch {
+      reachable = false;
+    }
+  }
+
+  // diagnose() + formatDoctor() are the shared pure doctor (src/doctor.ts) — same impl the unit
+  // tests and onboarding consume. No mirroring. Non-interactive/CI-safe: exit 1 on any failing check.
+  const result = diagnose({ apiUrl, hasToken, hasCredentials, reachable, driveCount });
+  console.log(formatDoctor(result));
+  if (!result.pass) process.exit(1);
 }
 
 // Launch pi with the extension preloaded + --no-skills (skills are registered as /name extension
@@ -119,9 +166,15 @@ function launchPi(passthrough) {
     passthrough.includes("--no-skills") || passthrough.includes("-ns") || passthrough.includes("--skill")
       ? []
       : ["--no-skills"];
+  // Spawn pi with a SANITIZED env: strip secret keys (PAGESPACE_AUTH_TOKEN) so pi's bash tool and
+  // any subprocess can NEVER read them via env/printenv/procfs. The provider reads the token from
+  // config (not the child env) — token isolation (security ADR: agent must never see the token).
+  const childEnv = sanitizeChildEnv(process.env);
+  childEnv.PI_SKIP_VERSION_CHECK = "1";
+  childEnv.PI_CODING_AGENT_DIR = PAGESPACE_AGENT_DIR;
   const child = spawn(process.execPath, [PI_CLI, "-e", extensionPath, ...noSkillsFlag, ...passthrough], {
     stdio: "inherit",
-    env: { ...process.env, PI_SKIP_VERSION_CHECK: "1", PI_CODING_AGENT_DIR: PAGESPACE_AGENT_DIR },
+    env: childEnv,
   });
   child.on("error", (err) => {
     console.error(`pagespace: failed to launch (${err.message}).`);
@@ -265,13 +318,143 @@ async function resumeCommand(ref, rest) {
   }
 }
 
-const sub = process.argv[2];
-if (sub === "status" || process.argv.includes("--check")) {
-  statusDoctor();
-} else if (sub === "sessions") {
-  sessionsCommand();
-} else if (sub === "resume") {
-  resumeCommand(process.argv[3], process.argv.slice(4));
-} else {
-  launchPi(process.argv.slice(2));
+async function loginCommand() {
+  // pagespace login — interactive token capture → validate → persist to ~/.pagespace/credentials (0600).
+  // The token never round-trips through .env or the shell env the agent sees (security ADR).
+  process.stderr.write("pagespace · login\n");
+  process.stderr.write("Paste your PageSpace token: ");
+  // Read the token from stdin as a normal line; it is written straight to the credential store,
+  // never to .env and never to the spawned pi env.
+  const readline = await import("node:readline/promises");
+  const { stdin, stdout } = process;
+  const rl = readline.createInterface({ input: stdin, output: stdout });
+  let token;
+  try {
+    token = (await rl.question("")).trim();
+  } finally {
+    rl.close();
+  }
+  if (!token) {
+    console.error("pagespace: no token entered — nothing saved.");
+    process.exit(1);
+  }
+  const apiUrl = (process.env.PAGESPACE_API_URL || "https://pagespace.ai").replace(/\/$/, "");
+  // Validate via an auth ping before persisting.
+  try {
+    const res = await fetch(`${apiUrl}/api/drives`, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      console.error(`pagespace: token rejected by ${apiUrl} (HTTP ${res.status}) — nothing saved.`);
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error(`pagespace: cannot reach ${apiUrl} to validate (${err.message}) — nothing saved.`);
+    process.exit(1);
+  }
+  // Build + write the record via the shared helpers (src/credentials.ts) — one impl, 0600 enforced.
+  const rec = buildCredentialRecord({ token, apiUrl });
+  const credPath = writeCredentials(rec);
+  process.stderr.write(`pagespace · token saved to ${credPath} (0600). Run: pagespace status\n`);
 }
+
+// Drive the full first-run onboarding flow (token → validate → drives → models → default → materialize)
+// using the shared pure state machine (src/onboarding.ts nextOnboardingStep). Each step performs its
+// effect, feeds the result into nextOnboardingStep, and loops until done. No local state logic —
+// the machine is the single implementation the unit tests exercise. Materialize via shared helpers.
+async function runOnboarding() {
+  let state = initialOnboardingState();
+  const base = (process.env.PAGESPACE_API_URL || "https://pagespace.ai").replace(/\/$/, "");
+
+  // STEP token: capture.
+  process.stderr.write("pagespace · first run — let's get you set up.\n");
+  process.stderr.write("Paste your PageSpace token: ");
+  const readline = await import("node:readline/promises");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  let token;
+  try { token = (await rl.question("")).trim(); } finally { rl.close(); }
+  if (!token) { console.error("pagespace: no token entered — nothing saved."); process.exit(1); }
+  state = nextOnboardingStep(state, { token });
+
+  // STEP validate: auth ping. On failure this is a terminal condition — the caller exits. (The
+  // machine only advances validate→drives on success; there is no recovery branch, so we don't
+  // call nextOnboardingStep with validated:false.)
+  const preferred = resolveDefaultDrive(process.env);
+  try {
+    const res = await fetch(`${base}/api/drives`, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      console.error(`pagespace: token rejected by ${base} (HTTP ${res.status}).`);
+      process.exit(1);
+    }
+    state = nextOnboardingStep(state, { validated: true });
+  } catch (err) {
+    console.error(`pagespace: cannot reach ${base} (${err.message}).`);
+    process.exit(1);
+  }
+
+  // STEP drives: discover accessible drives. Pass preferredDrive so the machine picks a default
+  // consistent with the drive used for preferred-first model ordering.
+  const drivesRaw = await fetch(`${base}/api/drives`, { headers: { authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => []);
+  const drives = (Array.isArray(drivesRaw) ? drivesRaw : drivesRaw?.drives || []).map((d) => ({ id: d.id, name: d.name, slug: d.slug }));
+  if (drives.length === 0) { console.error("pagespace: no drives accessible to this token."); process.exit(1); }
+  console.log(`  ✓ discovered ${drives.length} drive(s): ${drives.map((d) => d.slug).join(", ")}`);
+  state = nextOnboardingStep(state, { drives, preferredDrive: preferred });
+
+  // STEP models: discover agent pages across all drives (preferred/default drive first).
+  const orderPreferred = state.defaultDrive ?? drives[0].slug;
+  const ordered = [...drives].sort((a, b) => (a.slug === orderPreferred ? -1 : b.slug === orderPreferred ? 1 : 0));
+  const modelRes = await Promise.allSettled(ordered.map((d) =>
+    fetch(`${base}/api/drives/${d.id}/pages`, { headers: { authorization: `Bearer ${token}` } }).then((r) => r.json())
+  ));
+  const models = [];
+  const walk = (nodes) => { for (const n of nodes) { if (n.type === "AI_CHAT") models.push({ id: n.id, name: n.title }); if (n.children) walk(n.children); } };
+  for (const r of modelRes) if (r.status === "fulfilled" && Array.isArray(r.value)) walk(r.value);
+  console.log(`  ✓ discovered ${models.length} agent model(s)${models.length ? ": " + models.map((m) => m.name).join(", ") : ""}`);
+  state = nextOnboardingStep(state, { models });
+
+  // STEP default → done (the machine advances automatically; the default is the first discovered).
+  state = nextOnboardingStep(state);
+
+  // Materialize: persist token to the credential store (shared writeCredentials). Set non-secret
+  // drive/model defaults in the launcher env. The token does NOT go into env here — loadCredentials()
+  // will read it from the store on the next launch (token isolation holds: no env round-trip).
+  const credPath = writeCredentials(buildCredentialRecord({ token, apiUrl: base }));
+  if (state.defaultDrive) process.env.PAGESPACE_DRIVE = state.defaultDrive;
+  if (state.defaultModel) process.env.PAGESPACE_MODEL_PAGE = state.defaultModel.id;
+  console.log(`  ✓ default drive: ${state.defaultDrive || "(none)"}`);
+  if (state.defaultModel) {
+    console.log(`  ✓ default model: ${state.defaultModel.name} (${state.defaultModel.id.slice(0, 8)})`);
+  } else {
+    console.log("  · no agent models found — set PAGESPACE_MODEL_PAGE manually if needed.");
+  }
+  process.stderr.write(`pagespace · set up complete (${credPath}, 0600). Launching…\n`);
+}
+
+/** No token anywhere (env, .env, credential store) → run first-run onboarding instead of a hard exit.
+ * Uses the shared onboardingNeedsSetup() (src/onboarding.ts → diagnose()) — single decision path. */
+function needsOnboarding() {
+  const hasToken = !!(process.env.PAGESPACE_AUTH_TOKEN && process.env.PAGESPACE_AUTH_TOKEN.trim());
+  const hasCredentials = fs.existsSync(credentialsPath());
+  return onboardingNeedsSetup({ hasToken, hasCredentials });
+}
+
+async function main() {
+  const sub = process.argv[2];
+  if (sub === "status" || process.argv.includes("--check")) {
+    statusDoctor();
+  } else if (sub === "sessions") {
+    sessionsCommand();
+  } else if (sub === "resume") {
+    resumeCommand(process.argv[3], process.argv.slice(4));
+  } else if (sub === "login") {
+    loginCommand();
+  } else if (needsOnboarding()) {
+    // First run with no token: walk the user to a coding-ready state (Cursor-grade) instead of exiting.
+    await runOnboarding();
+    launchPi(process.argv.slice(2));
+  } else {
+    launchPi(process.argv.slice(2));
+  }
+}
+
+// Entry point — run after all declarations are initialized (avoids TDZ on module-level consts).
+// Only the tsx child reaches here (PAGESPACE_UNDER_TSX=1); the plain-node parent spawns + exits above.
+if (isTsx) main();

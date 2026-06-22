@@ -42,3 +42,15 @@ test("applyEnv: sets only unset/empty keys — the live shell env wins", () => {
   assert.equal(env.PAGESPACE_MOUNT, "pagespace"); // unset → filled
   assert.deepEqual(applied.sort(), ["PAGESPACE_DRIVE", "PAGESPACE_MOUNT"]);
 });
+
+test("applyEnv: never injects secret keys from .env into process env", () => {
+  const env: NodeJS.ProcessEnv = { PAGESPACE_DRIVE: "" };
+  const applied = applyEnv(
+    { PAGESPACE_AUTH_TOKEN: "file-token", PAGESPACE_DRIVE: "from-file", PAGESPACE_MOUNT: "pagespace" },
+    env,
+  );
+  assert.equal(env.PAGESPACE_AUTH_TOKEN, undefined, "secret key must be skipped");
+  assert.equal(env.PAGESPACE_DRIVE, "from-file");
+  assert.equal(env.PAGESPACE_MOUNT, "pagespace");
+  assert.deepEqual(applied.sort(), ["PAGESPACE_DRIVE", "PAGESPACE_MOUNT"]);
+});
