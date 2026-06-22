@@ -50,6 +50,27 @@ function loadDotenv(startDir = process.cwd()) {
 }
 loadDotenv();
 
+// Load credentials from the store (~/.pagespace/credentials, 0600) if no token is set via env/.env.
+// The token enters the LAUNCHER's process.env here so loadConfig()/the provider can read it — but
+// launchPi() strips it before spawning pi (token isolation). So the agent never sees it.
+(function loadCredentials() {
+  if (process.env.PAGESPACE_AUTH_TOKEN && process.env.PAGESPACE_AUTH_TOKEN.trim()) return;
+  const credPath = path.join(os.homedir(), ".pagespace", "credentials");
+  try {
+    if (!fs.existsSync(credPath)) return;
+    const stat = fs.statSync(credPath);
+    if (stat.mode & 0o077) {
+      console.error(`pagespace: ${credPath} is group/world readable (${(stat.mode & 0o777).toString(8)}); run: chmod 600 ${credPath}`);
+      process.exit(1);
+    }
+    const rec = JSON.parse(fs.readFileSync(credPath, "utf8"));
+    if (rec.token) process.env.PAGESPACE_AUTH_TOKEN = rec.token;
+    if (!process.env.PAGESPACE_API_URL && rec.apiUrl) process.env.PAGESPACE_API_URL = rec.apiUrl;
+  } catch {
+    /* unreadable credential file — fall back to whatever env holds */
+  }
+})();
+
 // Secret env keys stripped from the spawned pi process so pi's bash tool can never read them
 // (token isolation — the agent must never see the PageSpace auth token). Mirrors src/env.ts.
 const SECRET_ENV_KEYS = ["PAGESPACE_AUTH_TOKEN"];
@@ -280,6 +301,48 @@ async function resumeCommand(ref, rest) {
   }
 }
 
+async function loginCommand() {
+  // pagespace login — interactive token capture → validate → persist to ~/.pagespace/credentials (0600).
+  // The token never round-trips through .env or the shell env the agent sees (security ADR).
+  process.stderr.write("pagespace · login\n");
+  process.stderr.write("Paste your PageSpace token (input is hidden): ");
+  // Read the token from stdin (tty off mode so it doesn't echo). Node has no built-in hidden prompt,
+  // so we read a line as-is — the token is written straight to the credential store, never to env.
+  const readline = await import("node:readline/promises");
+  const { stdin, stdout } = process;
+  const rl = readline.createInterface({ input: stdin, output: stdout });
+  let token;
+  try {
+    token = (await rl.question("")).trim();
+  } finally {
+    rl.close();
+  }
+  if (!token) {
+    console.error("pagespace: no token entered — nothing saved.");
+    process.exit(1);
+  }
+  const apiUrl = (process.env.PAGESPACE_API_URL || "https://pagespace.ai").replace(/\/$/, "");
+  // Validate via an auth ping before persisting.
+  try {
+    const res = await fetch(`${apiUrl}/api/drives`, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      console.error(`pagespace: token rejected by ${apiUrl} (HTTP ${res.status}) — nothing saved.`);
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error(`pagespace: cannot reach ${apiUrl} to validate (${err.message}) — nothing saved.`);
+    process.exit(1);
+  }
+  // Build + write the record (buildCredentialRecord/parseCredentialRecord mirrored from src/credentials.ts).
+  const rec = { token, apiUrl, savedAt: new Date().toISOString() };
+  const dir = path.join(os.homedir(), ".pagespace");
+  const credPath = path.join(dir, "credentials");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(credPath, JSON.stringify(rec, null, 2), { mode: 0o600 });
+  fs.chmodSync(credPath, 0o600);
+  process.stderr.write(`pagespace · token saved to ${credPath} (0600). Run: pagespace status\n`);
+}
+
 const sub = process.argv[2];
 if (sub === "status" || process.argv.includes("--check")) {
   statusDoctor();
@@ -287,6 +350,8 @@ if (sub === "status" || process.argv.includes("--check")) {
   sessionsCommand();
 } else if (sub === "resume") {
   resumeCommand(process.argv[3], process.argv.slice(4));
+} else if (sub === "login") {
+  loginCommand();
 } else {
   launchPi(process.argv.slice(2));
 }
