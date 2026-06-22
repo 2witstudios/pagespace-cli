@@ -89,13 +89,14 @@ In-session model switching:
 
 ## Configuration
 
-Token/config can come from three sources. Default UX is the credential store; override paths still work.
+Token/config can come from several sources. Default UX is the credential store; override paths still work for those who need them.
 
 1. **Credential store (recommended):** `~/.pagespace/credentials` (mode `0600`). Written by first-run onboarding or `pagespace login`. Global across projects.
 2. **Project env files (optional override):** `.env.local` then `.env`, auto-loaded by the launcher.
-3. **Shell env (highest precedence):** exported env vars always win at runtime.
+3. **`.mcp.json` (optional override, MCP workflows):** holds the token for MCP-server workflows (see `.mcp.json.example`). Not required for the harness itself — `pagespace` reads from the credential store / env, not `.mcp.json`.
+4. **Shell env (highest precedence):** exported env vars always win at runtime.
 
-Effective precedence is: **shell env > `.env.local`/`.env` > credential store**.
+Effective precedence is: **shell env > `.env.local`/`.env` > credential store**. (`.mcp.json` is consumed by MCP clients, not the launcher's token resolution.)
 
 ### Environment variables
 
