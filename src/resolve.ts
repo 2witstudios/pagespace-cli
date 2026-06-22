@@ -55,6 +55,10 @@ export class PageSpaceResolver {
     else this.childrenByDrive.clear();
   }
 
+  async listDrives(): Promise<Drive[]> {
+    return [...(await this.drives()).values()];
+  }
+
   async children(driveId: string, parentId: string | null): Promise<Page[]> {
     return (await this.childIndex(driveId)).get(parentId) ?? [];
   }

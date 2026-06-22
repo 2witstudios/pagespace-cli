@@ -416,12 +416,13 @@ async function runOnboarding() {
   // will read it from the store on the next launch (token isolation holds: no env round-trip).
   const credPath = writeCredentials(buildCredentialRecord({ token, apiUrl: base }));
   if (state.defaultDrive) process.env.PAGESPACE_DRIVE = state.defaultDrive;
-  if (state.defaultModel) process.env.PAGESPACE_MODEL_PAGE = state.defaultModel.id;
-  console.log(`  ✓ default drive: ${state.defaultDrive || "(none)"}`);
-  if (state.defaultModel) {
-    console.log(`  ✓ default model: ${state.defaultModel.name} (${state.defaultModel.id.slice(0, 8)})`);
+  const allModels = state.models ?? [];
+  if (allModels.length > 0) process.env.PAGESPACE_MODEL_PAGES = allModels.map((m) => m.id).join(",");
+  console.log(`  ✓ drive: ${state.defaultDrive || "(none)"}`);
+  if (allModels.length > 0) {
+    console.log(`  ✓ ${allModels.length} agent model(s): ${allModels.map((m) => m.name).join(", ")}`);
   } else {
-    console.log("  · no agent models found — set PAGESPACE_MODEL_PAGE manually if needed.");
+    console.log("  · no agent models found — set PAGESPACE_MODEL_PAGES manually if needed.");
   }
   process.stderr.write(`pagespace · set up complete (${credPath}, 0600). Launching…\n`);
 }

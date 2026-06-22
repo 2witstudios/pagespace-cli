@@ -321,6 +321,11 @@ export function createPageSpaceOps(
         return { isDirectory: () => dir };
       },
       readdir: async (p) => {
+        const rel = toMountRel(p);
+        if (rel === "") {
+          const drives = await resolver.listDrives();
+          return drives.map((d) => d.slug);
+        }
         const { driveId, parentId } = await containerId(p);
         const kids = await resolver.children(driveId, parentId);
         return kids.map((k) => k.title);
@@ -330,13 +335,10 @@ export function createPageSpaceOps(
       exists,
       glob: async (pattern, cwd, options) => {
         const rel = toMountRel(cwd);
-        const r = await resolver.resolve(rel);
-        const driveId = r.driveId;
-        const startParent = rel === "" ? null : r.page ? r.page.id : null;
         const re = globToRegExp(pattern);
         const base = norm(cwd);
         const out: string[] = [];
-        const walk = async (parentId: string | null, prefix: string) => {
+        const walkDrive = async (driveId: string, parentId: string | null, prefix: string) => {
           if (out.length >= options.limit) return;
           for (const k of await resolver.children(driveId, parentId)) {
             const childRel = prefix ? `${prefix}/${k.title}` : k.title;
@@ -344,10 +346,18 @@ export function createPageSpaceOps(
               out.push(`${base}/${childRel}`);
               if (out.length >= options.limit) return;
             }
-            if (k.type === "FOLDER") await walk(k.id, childRel);
+            if (k.type === "FOLDER") await walkDrive(driveId, k.id, childRel);
           }
         };
-        await walk(startParent, "");
+        if (rel === "") {
+          for (const drive of await resolver.listDrives()) {
+            await walkDrive(drive.id, null, drive.slug);
+          }
+        } else {
+          const r = await resolver.resolve(rel);
+          const startParent = r.page ? r.page.id : null;
+          await walkDrive(r.driveId, startParent, "");
+        }
         return out.slice(0, options.limit);
       },
     },
