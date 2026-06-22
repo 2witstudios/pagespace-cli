@@ -26,7 +26,7 @@ if (!isTsx) {
     else process.exit(code ?? 0);
   });
 } else {
-  main();
+  // main() is called at the end of the file, after all declarations (avoids TDZ on consts).
 }
 // Shared pure modules — one implementation consumed by statusDoctor + onboarding + tests. No mirroring.
 import { diagnose, formatDoctor } from "../src/doctor.ts";
@@ -463,3 +463,7 @@ if (sub === "status" || process.argv.includes("--check")) {
   launchPi(process.argv.slice(2));
 }
 }
+
+// Entry point — run after all declarations are initialized (avoids TDZ on module-level consts).
+// Only the tsx child reaches here (PAGESPACE_UNDER_TSX=1); the plain-node parent spawns + exits above.
+if (isTsx) main();
