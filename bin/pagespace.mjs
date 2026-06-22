@@ -322,7 +322,6 @@ async function loginCommand() {
   // pagespace login — interactive token capture → validate → persist to ~/.pagespace/credentials (0600).
   // The token never round-trips through .env or the shell env the agent sees (security ADR).
   process.stderr.write("pagespace · login\n");
-  process.stderr.write("Paste your PageSpace token: ");
   // Read the token from stdin as a normal line; it is written straight to the credential store,
   // never to .env and never to the spawned pi env.
   const readline = await import("node:readline/promises");
@@ -330,7 +329,7 @@ async function loginCommand() {
   const rl = readline.createInterface({ input: stdin, output: stdout });
   let token;
   try {
-    token = (await rl.question("")).trim();
+    token = (await rl.question("Paste your PageSpace token: ")).trim();
   } finally {
     rl.close();
   }
@@ -366,11 +365,10 @@ async function runOnboarding() {
 
   // STEP token: capture.
   process.stderr.write("pagespace · first run — let's get you set up.\n");
-  process.stderr.write("Paste your PageSpace token: ");
   const readline = await import("node:readline/promises");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   let token;
-  try { token = (await rl.question("")).trim(); } finally { rl.close(); }
+  try { token = (await rl.question("Paste your PageSpace token: ")).trim(); } finally { rl.close(); }
   if (!token) { console.error("pagespace: no token entered — nothing saved."); process.exit(1); }
   state = nextOnboardingStep(state, { token });
 
