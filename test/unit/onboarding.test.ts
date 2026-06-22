@@ -42,11 +42,14 @@ test("nextOnboardingStep advances validate→drives when token validates", () =>
   assert.equal(out.step, "drives");
 });
 
-test("nextOnboardingStep returns to token when validation fails", () => {
+test("nextOnboardingStep holds at validate when validated is not true (one-shot contract)", () => {
+  // Validate is one-shot-and-exit-on-failure by design: the caller exits on a failed auth ping and
+  // never calls the machine with validated:false. So the machine only advances on validated:true;
+  // without it, it holds (a terminal condition the caller owns, not a recovery the machine owns).
   const s: OnboardingState = { ...base, token: "mcp_abc", step: "validate" };
-  const out = nextOnboardingStep(s, { validated: false });
-  assert.equal(out.step, "token");
-  assert.equal(out.token, null, "clears the bad token");
+  const out = nextOnboardingStep(s, {});
+  assert.equal(out.step, "validate");
+  assert.equal(out.token, "mcp_abc", "token preserved when held");
 });
 
 test("nextOnboardingStep advances drives→models when drives discovered", () => {

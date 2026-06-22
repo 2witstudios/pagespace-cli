@@ -374,20 +374,18 @@ async function runOnboarding() {
   if (!token) { console.error("pagespace: no token entered — nothing saved."); process.exit(1); }
   state = nextOnboardingStep(state, { token });
 
-  // STEP validate: auth ping. On failure, advance the machine with validated:false (exercises its
-  // real transition — clears the token, returns to the token step) then exit, so the machine's
-  // recovery path is coherent with production behavior rather than dead code.
+  // STEP validate: auth ping. On failure this is a terminal condition — the caller exits. (The
+  // machine only advances validate→drives on success; there is no recovery branch, so we don't
+  // call nextOnboardingStep with validated:false.)
   const preferred = resolveDefaultDrive(process.env);
   try {
     const res = await fetch(`${base}/api/drives`, { headers: { authorization: `Bearer ${token}` } });
     if (!res.ok) {
-      state = nextOnboardingStep(state, { validated: false });
       console.error(`pagespace: token rejected by ${base} (HTTP ${res.status}).`);
       process.exit(1);
     }
     state = nextOnboardingStep(state, { validated: true });
   } catch (err) {
-    state = nextOnboardingStep(state, { validated: false });
     console.error(`pagespace: cannot reach ${base} (${err.message}).`);
     process.exit(1);
   }

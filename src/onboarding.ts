@@ -84,12 +84,10 @@ export function nextOnboardingStep(state: OnboardingState, input: OnboardingInpu
       break;
     }
     case "validate": {
-      if (input.validated) {
-        next.step = "drives";
-      } else {
-        next.step = "token";
-        next.token = null; // clear the rejected token
-      }
+      // Validate is one-shot: advance to drives only on success. A failed auth ping is a terminal
+      // condition the caller handles (exit) — the machine never receives validated:false, so there
+      // is no recovery branch to go stale. (Onboarding is one-shot-and-exit-on-failure by design.)
+      if (input.validated) next.step = "drives";
       break;
     }
     case "drives": {
