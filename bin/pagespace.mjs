@@ -417,10 +417,9 @@ async function runOnboarding() {
   const credPath = writeCredentials(buildCredentialRecord({ token, apiUrl: base }));
   if (state.defaultDrive) process.env.PAGESPACE_DRIVE = state.defaultDrive;
   const allModels = state.models ?? [];
-  if (allModels.length > 0) process.env.PAGESPACE_MODEL_PAGES = allModels.map((m) => m.id).join(",");
   console.log(`  ✓ drive: ${state.defaultDrive || "(none)"}`);
   if (allModels.length > 0) {
-    console.log(`  ✓ ${allModels.length} agent model(s): ${allModels.map((m) => m.name).join(", ")}`);
+    console.log(`  ✓ ${allModels.length} agent model(s) discovered: ${allModels.map((m) => m.name).join(", ")}`);
   } else {
     console.log("  · no agent models found — set PAGESPACE_MODEL_PAGES manually if needed.");
   }
