@@ -44,6 +44,8 @@ export interface OnboardingInput {
   token?: string;
   validated?: boolean;
   drives?: OnboardingDrive[];
+  /** The env/configured preferred drive — used to pick the default when it's in the discovered set. */
+  preferredDrive?: string;
   models?: OnboardingModel[];
 }
 
@@ -94,7 +96,11 @@ export function nextOnboardingStep(state: OnboardingState, input: OnboardingInpu
       const drives = input.drives;
       if (drives && drives.length > 0) {
         next.drives = drives;
-        next.defaultDrive = drives[0].slug; // default to the first (preferred) drive
+        // Default drive: the preferred/configured drive if it's in the discovered set, else the first.
+        // This keeps the reported default consistent with the drive used for preferred-first ordering.
+        const preferred = input.preferredDrive;
+        const inSet = preferred && drives.some((d) => d.slug === preferred);
+        next.defaultDrive = inSet ? preferred : drives[0].slug;
         next.step = "models";
       }
       break;

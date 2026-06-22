@@ -109,3 +109,35 @@ test("onboardingNeedsSetup uses the doctor to decide if onboarding is needed", a
   // Credential store alone is enough (the Cursor-grade path).
   assert.equal(onboardingNeedsSetup({ hasToken: false, hasCredentials: true }), false);
 });
+
+test("nextOnboardingStep picks the preferred drive as default when it's in the discovered set", () => {
+  const s: OnboardingState = { ...base, token: "mcp_abc", step: "drives" };
+  const out = nextOnboardingStep(s, {
+    drives: [
+      { slug: "a", id: "1", name: "A" },
+      { slug: "b", id: "2", name: "B" },
+    ],
+    preferredDrive: "b",
+  });
+  assert.equal(out.defaultDrive, "b", "preferred drive wins when in the set");
+});
+
+test("nextOnboardingStep falls back to first drive when preferred is not in the discovered set", () => {
+  const s: OnboardingState = { ...base, token: "mcp_abc", step: "drives" };
+  const out = nextOnboardingStep(s, {
+    drives: [{ slug: "a", id: "1", name: "A" }],
+    preferredDrive: "nonexistent",
+  });
+  assert.equal(out.defaultDrive, "a", "falls back to first drive");
+});
+
+test("nextOnboardingStep without preferredDrive still defaults to first (back-compat)", () => {
+  const s: OnboardingState = { ...base, token: "mcp_abc", step: "drives" };
+  const out = nextOnboardingStep(s, {
+    drives: [
+      { slug: "a", id: "1", name: "A" },
+      { slug: "b", id: "2", name: "B" },
+    ],
+  });
+  assert.equal(out.defaultDrive, "a");
+});

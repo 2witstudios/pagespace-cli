@@ -374,26 +374,35 @@ async function runOnboarding() {
   if (!token) { console.error("pagespace: no token entered — nothing saved."); process.exit(1); }
   state = nextOnboardingStep(state, { token });
 
-  // STEP validate: auth ping.
+  // STEP validate: auth ping. On failure, advance the machine with validated:false (exercises its
+  // real transition — clears the token, returns to the token step) then exit, so the machine's
+  // recovery path is coherent with production behavior rather than dead code.
+  const preferred = resolveDefaultDrive(process.env);
   try {
     const res = await fetch(`${base}/api/drives`, { headers: { authorization: `Bearer ${token}` } });
-    if (!res.ok) { console.error(`pagespace: token rejected by ${base} (HTTP ${res.status}).`); process.exit(1); }
+    if (!res.ok) {
+      state = nextOnboardingStep(state, { validated: false });
+      console.error(`pagespace: token rejected by ${base} (HTTP ${res.status}).`);
+      process.exit(1);
+    }
     state = nextOnboardingStep(state, { validated: true });
   } catch (err) {
+    state = nextOnboardingStep(state, { validated: false });
     console.error(`pagespace: cannot reach ${base} (${err.message}).`);
     process.exit(1);
   }
 
-  // STEP drives: discover accessible drives.
+  // STEP drives: discover accessible drives. Pass preferredDrive so the machine picks a default
+  // consistent with the drive used for preferred-first model ordering.
   const drivesRaw = await fetch(`${base}/api/drives`, { headers: { authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => []);
   const drives = (Array.isArray(drivesRaw) ? drivesRaw : drivesRaw?.drives || []).map((d) => ({ id: d.id, name: d.name, slug: d.slug }));
   if (drives.length === 0) { console.error("pagespace: no drives accessible to this token."); process.exit(1); }
   console.log(`  ✓ discovered ${drives.length} drive(s): ${drives.map((d) => d.slug).join(", ")}`);
-  state = nextOnboardingStep(state, { drives });
+  state = nextOnboardingStep(state, { drives, preferredDrive: preferred });
 
-  // STEP models: discover agent pages across all drives (preferred/default drive first via config).
-  const preferred = resolveDefaultDrive(process.env) ?? state.defaultDrive;
-  const ordered = [...drives].sort((a, b) => (a.slug === preferred ? -1 : b.slug === preferred ? 1 : 0));
+  // STEP models: discover agent pages across all drives (preferred/default drive first).
+  const orderPreferred = state.defaultDrive ?? drives[0].slug;
+  const ordered = [...drives].sort((a, b) => (a.slug === orderPreferred ? -1 : b.slug === orderPreferred ? 1 : 0));
   const modelRes = await Promise.allSettled(ordered.map((d) =>
     fetch(`${base}/api/drives/${d.id}/pages`, { headers: { authorization: `Bearer ${token}` } }).then((r) => r.json())
   ));
@@ -413,7 +422,11 @@ async function runOnboarding() {
   if (state.defaultDrive) process.env.PAGESPACE_DRIVE = state.defaultDrive;
   if (state.defaultModel) process.env.PAGESPACE_MODEL_PAGE = state.defaultModel.id;
   console.log(`  ✓ default drive: ${state.defaultDrive || "(none)"}`);
-  console.log(`  ✓ default model: ${state.defaultModel?.name || "(none)"} (${state.defaultModel?.id?.slice(0, 8) || ""})`);
+  if (state.defaultModel) {
+    console.log(`  ✓ default model: ${state.defaultModel.name} (${state.defaultModel.id.slice(0, 8)})`);
+  } else {
+    console.log("  · no agent models found — set PAGESPACE_MODEL_PAGE manually if needed.");
+  }
   process.stderr.write(`pagespace · set up complete (${credPath}, 0600). Launching…\n`);
 }
 
