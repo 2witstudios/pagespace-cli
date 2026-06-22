@@ -17,6 +17,7 @@ import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { sanitizeChildEnv } from "../src/env.ts";
+import { loadConfig } from "../src/config.ts";
 
 test("the launcher sanitizes its spawn env (bin/pagespace.mjs wires sanitizeChildEnv)", () => {
   const binSrc = readFileSync(new URL("../bin/pagespace.mjs", import.meta.url), "utf8");
@@ -54,4 +55,25 @@ test("token is invisible through the bash-tool env path (env / printenv / procfs
       `${v.name}: the token's env-key name leaked through the bash-tool env path`,
     );
   }
+});
+
+test("isolation AND auth path: sanitized child env + credential-store fallback yields authToken", () => {
+  const childEnv = sanitizeChildEnv({ ...process.env, PAGESPACE_AUTH_TOKEN: "mcp_PROOF_LEAK" });
+  assert.equal(childEnv.PAGESPACE_AUTH_TOKEN, undefined, "token must not reach spawned pi env");
+
+  const config = loadConfig(
+    {
+      ...childEnv,
+      PAGESPACE_AUTH_TOKEN: undefined,
+      PAGESPACE_API_URL: "https://pagespace.ai",
+    },
+    () => ({
+      token: "mcp_from_store",
+      apiUrl: "https://pagespace.ai",
+      savedAt: "2026-06-22T00:00:00.000Z",
+    }),
+  );
+
+  assert.ok(config.authToken, "auth token should still resolve via credential store");
+  assert.equal(config.authToken, "mcp_from_store");
 });

@@ -1,3 +1,5 @@
+import { readCredentials, type CredentialRecord } from "./credentials.ts";
+
 /** Runtime configuration for the PageSpace companion, resolved from env. */
 export interface PageSpaceConfig {
   /** Base URL of the PageSpace instance, e.g. https://pagespace.ai */
@@ -62,9 +64,21 @@ export function resolveDefaultDrive(env: {
     .find(Boolean);
 }
 
-export function loadConfig(): PageSpaceConfig {
-  const configuredPrimary = process.env.PAGESPACE_MODEL_PAGE?.trim();
-  const modelPageIds = (process.env.PAGESPACE_MODEL_PAGES ?? "")
+export function resolveAuthToken(
+  env: NodeJS.ProcessEnv,
+  readCredential: () => CredentialRecord | null = readCredentials,
+): string | undefined {
+  const envToken = env.PAGESPACE_AUTH_TOKEN?.trim();
+  if (envToken) return envToken;
+  return readCredential()?.token;
+}
+
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  readCredential: () => CredentialRecord | null = readCredentials,
+): PageSpaceConfig {
+  const configuredPrimary = env.PAGESPACE_MODEL_PAGE?.trim();
+  const modelPageIds = (env.PAGESPACE_MODEL_PAGES ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
@@ -72,13 +86,13 @@ export function loadConfig(): PageSpaceConfig {
   const modelPageId = ids[0];
 
   return {
-    apiUrl: process.env.PAGESPACE_API_URL ?? "https://pagespace.ai",
-    authToken: process.env.PAGESPACE_AUTH_TOKEN,
-    defaultDriveSlug: resolveDefaultDrive(process.env) ?? process.env.PAGESPACE_DRIVE,
-    mountPrefix: process.env.PAGESPACE_MOUNT ?? "pagespace",
+    apiUrl: env.PAGESPACE_API_URL ?? "https://pagespace.ai",
+    authToken: resolveAuthToken(env, readCredential),
+    defaultDriveSlug: resolveDefaultDrive(env) ?? env.PAGESPACE_DRIVE,
+    mountPrefix: env.PAGESPACE_MOUNT ?? "pagespace",
     modelPageId,
     models: ids.length > 0 ? ids.map((id) => ({ id })) : undefined,
-    readOnlyPrefixes: (process.env.PAGESPACE_READONLY ?? "")
+    readOnlyPrefixes: (env.PAGESPACE_READONLY ?? "")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),
