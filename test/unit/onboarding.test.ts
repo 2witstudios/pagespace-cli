@@ -96,3 +96,16 @@ test("onboarding a user with a single drive + single model resolves to done in t
   assert.equal(s.defaultDrive, "a");
   assert.deepEqual(s.defaultModel, { id: "m1", name: "Brain" });
 });
+
+test("onboardingNeedsSetup uses the doctor to decide if onboarding is needed", async () => {
+  const { onboardingNeedsSetup } = await import("../../src/onboarding.ts");
+  // A failing doctor (no token) → onboarding needed.
+  assert.equal(onboardingNeedsSetup({ hasToken: false, hasCredentials: false }), true);
+  // A passing doctor (token present) → no onboarding needed.
+  assert.equal(
+    onboardingNeedsSetup({ hasToken: true, hasCredentials: true, apiUrl: "https://pagespace.ai" }),
+    false,
+  );
+  // Credential store alone is enough (the Cursor-grade path).
+  assert.equal(onboardingNeedsSetup({ hasToken: false, hasCredentials: true }), false);
+});

@@ -5,7 +5,11 @@
  * The flow is a pure state machine (unit-tested): token → validate → drives → models → default → done.
  * Effects (auth ping, drive/model discovery) live in the launcher and feed results back in via the
  * `input` argument. Token capture writes straight to the credential store (never .env/agent env).
+ *
+ * Reuses the doctor (src/doctor.ts) for the setup-needed decision — one shared diagnostic layer
+ * consumed by both the launcher's `pagespace status` and the onboarding gate.
  */
+import { diagnose, type DoctorInput } from "./doctor.ts";
 
 /** A drive discovered during onboarding. */
 export interface OnboardingDrive {
@@ -117,4 +121,15 @@ export function nextOnboardingStep(state: OnboardingState, input: OnboardingInpu
       break;
   }
   return next;
+}
+
+/**
+ * Decide whether first-run onboarding is needed, by running the shared doctor and checking the
+ * token + credential-store checks. Pure; consumes diagnose() so the doctor is the single source of
+ * "is config OK?" for both `pagespace status` and the onboarding gate. Reuse, not duplication.
+ */
+export function onboardingNeedsSetup(input: DoctorInput): boolean {
+  const result = diagnose(input);
+  const tokenOk = result.checks.find((c) => c.id === "token")?.pass ?? false;
+  return !tokenOk;
 }
