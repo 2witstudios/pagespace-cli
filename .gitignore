@@ -15,3 +15,4 @@ auth.json
 
 # pure-point-guard per-project config (machine-absolute paths)
 .pu/
+*.tgz
