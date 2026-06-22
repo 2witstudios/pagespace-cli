@@ -121,8 +121,9 @@ test("onboardingNeedsSetup uses the doctor to decide if onboarding is needed", a
     onboardingNeedsSetup({ hasToken: true, hasCredentials: true, apiUrl: "https://pagespace.ai" }),
     false,
   );
-  // Credential store alone is enough (the Cursor-grade path).
-  assert.equal(onboardingNeedsSetup({ hasToken: false, hasCredentials: true }), false);
+  // Credential store path: the launcher's loadCredentials() IIFE copies the token into env
+  // before needsOnboarding() is called, so hasToken is always true when credentials are readable.
+  assert.equal(onboardingNeedsSetup({ hasToken: true, hasCredentials: true }), false);
 });
 
 test("nextOnboardingStep picks the preferred drive as default when it's in the discovered set", () => {

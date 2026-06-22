@@ -65,3 +65,16 @@ test("non-interactive mode: diagnose never prompts (pure, returns results only)"
   assert.equal(r.pass, false);
   assert.ok(r.remediation.length > 0 || r.checks.some((c) => c.remediation));
 });
+
+test("diagnose token check does not false-green when credential file exists but token is unusable", () => {
+  // hasCredentials=true (file exists) but hasToken=false (token unreadable/corrupt) must FAIL the
+  // token check — credential-store presence is a separate check; it must not rescue the token check.
+  const r = diagnose({ apiUrl: "https://pagespace.ai", hasToken: false, hasCredentials: true });
+  const tokenCheck = r.checks.find((c) => c.id === "token");
+  assert.equal(
+    tokenCheck?.pass,
+    false,
+    "token check must fail when hasToken is false, even with credentials present",
+  );
+  assert.equal(r.pass, false, "overall pass must be false");
+});

@@ -65,8 +65,10 @@ export function diagnose(input: DoctorInput): DoctorResult {
     remediation: "set PAGESPACE_API_URL to an http(s) URL (default: https://pagespace.ai).",
   });
 
-  // token check — present in env/.env OR in the credential store.
-  const hasToken = !!(input.hasToken || input.hasCredentials);
+  // token check — effective token resolved by the caller (env or credential store).
+  // Uses input.hasToken only; the credential-store check is a separate check below so that a
+  // credential file that exists but is corrupt/unreadable can't produce a false-green here.
+  const hasToken = !!input.hasToken;
   checks.push({
     id: "token",
     label: "Auth token",
