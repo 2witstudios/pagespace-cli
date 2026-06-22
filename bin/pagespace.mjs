@@ -80,45 +80,47 @@ function sanitizeChildEnv(env) {
   return out;
 }
 
-const CONFIG_KEYS = [
-  ["PAGESPACE_AUTH_TOKEN", true, "scoped MCP token (Bearer)"],
-  ["PAGESPACE_API_URL", false, "instance URL (default https://pagespace.ai)"],
-  ["PAGESPACE_DRIVE", false, "default drive slug (mount + memory)"],
-  ["PAGESPACE_MODEL_PAGE", false, "brain agent page id (ps-agent://<id>)"],
-  ["PAGESPACE_MODEL_PAGES", false, "comma-separated brain agent ids for /model toggling"],
-];
-
 async function statusDoctor() {
-  console.log("pagespace config:");
-  let missingRequired = false;
-  for (const [key, required, label] of CONFIG_KEYS) {
-    const set = !!(process.env[key] && process.env[key].trim());
-    if (!set && required) missingRequired = true;
-    console.log(`  ${set ? "✓" : required ? "✗" : "·"} ${key}${set ? "" : ` (unset — ${label})`}`);
-  }
-  // Also surface the credential store state.
+  // Reusable doctor (src/doctor.ts): gathers inputs, calls diagnose(), prints structured results.
+  // Non-interactive/CI-safe: never prompts; exit 1 on any failing check.
+  const apiUrl = (process.env.PAGESPACE_API_URL || "https://pagespace.ai").replace(/\/$/, "");
   const credPath = path.join(os.homedir(), ".pagespace", "credentials");
-  const hasCreds = fs.existsSync(credPath);
-  console.log(`  ${hasCreds ? "✓" : "·"} credentials: ${hasCreds ? "present (~/.pagespace/credentials)" : "not set (run: pagespace login)"}`);
-  if (missingRequired) {
-    console.log("  → copy .mcp.json.example to .mcp.json and set your token, or export the env vars.");
-    process.exit(1);
-  }
-  const url = (process.env.PAGESPACE_API_URL || "https://pagespace.ai").replace(/\/$/, "");
+  const hasCredentials = fs.existsSync(credPath);
+  const hasToken = !!(process.env.PAGESPACE_AUTH_TOKEN && process.env.PAGESPACE_AUTH_TOKEN.trim());
   const token = process.env.PAGESPACE_AUTH_TOKEN;
-  try {
-    const res = await fetch(`${url}/api/drives`, { headers: { authorization: `Bearer ${token}` } });
-    if (!res.ok) {
-      console.log(`  ✗ auth ping ${url}: HTTP ${res.status} — check the token/permissions.`);
-      process.exit(1);
+
+  let reachable;
+  let driveCount;
+  if (hasToken || hasCredentials) {
+    try {
+      const res = await fetch(`${apiUrl}/api/drives`, { headers: { authorization: `Bearer ${token}` } });
+      reachable = res.ok;
+      if (res.ok) {
+        const data = await res.json().catch(() => []);
+        driveCount = Array.isArray(data) ? data.length : Array.isArray(data?.drives) ? data.drives.length : 0;
+      }
+    } catch {
+      reachable = false;
     }
-    const data = await res.json().catch(() => []);
-    const n = Array.isArray(data) ? data.length : Array.isArray(data?.drives) ? data.drives.length : "?";
-    console.log(`  ✓ reachable: ${url} — ${n} drive(s) visible to this token.`);
-  } catch (err) {
-    console.log(`  ✗ cannot reach ${url}: ${err.message}`);
+  }
+
+  // diagnose() is pure (src/doctor.ts) — mirrored here as the launcher can't import TS.
+  const checks = [];
+  checks.push({ id: "apiUrl", label: "API URL", pass: /^https?:\/\//.test(apiUrl), detail: apiUrl, remediation: "set PAGESPACE_API_URL to an http(s) URL." });
+  checks.push({ id: "token", label: "Auth token", pass: !!(hasToken || hasCredentials), detail: (hasToken || hasCredentials) ? "present" : "unset", remediation: "run: pagespace login  (or export PAGESPACE_AUTH_TOKEN)." });
+  checks.push({ id: "credentials", label: "Credential store", pass: hasCredentials, detail: hasCredentials ? "present (~/.pagespace/credentials)" : "not set", remediation: "run: pagespace login  to persist a token (0600)." });
+  if (reachable !== undefined) checks.push({ id: "reachable", label: "Reachable", pass: reachable, detail: reachable ? `${apiUrl} — ${driveCount ?? "?"} drive(s) visible` : `cannot reach ${apiUrl}`, remediation: `check network/URL/token scope against ${apiUrl}.` });
+  const pass = checks.every((c) => c.pass);
+
+  console.log("pagespace status:");
+  for (const c of checks) console.log(`  ${c.pass ? "✓" : "✗"} ${c.label}: ${c.detail}`);
+  const failing = checks.filter((c) => !c.pass);
+  if (failing.length > 0) {
+    console.log("  → fix:");
+    for (const c of failing) console.log(`    ${c.remediation}`);
     process.exit(1);
   }
+  console.log("  → all checks passed.");
 }
 
 // Launch pi with the extension preloaded + --no-skills (skills are registered as /name extension
