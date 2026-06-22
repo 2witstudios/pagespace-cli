@@ -36,22 +36,20 @@
 ## Quickstart
 
 ```bash
-git clone https://github.com/2witstudios/pagespace-cli.git
-cd pagespace-cli
-npm install          # resolves vendored pi workspaces in packages/
-npm run build        # required: builds workspace pi packages to dist/ (~3s)
+npm install -g pagespace-cli
+pagespace
 ```
 
-This repo vendors pi via npm workspaces (`packages/`), so you do **not** need a global pi install.
+That's it. The first run walks you through onboarding (token → drives → models → launch).
 
-Launch either way:
+**From source (contributors):**
 
 ```bash
-npm link             # optional: puts `pagespace` on your PATH
+git clone https://github.com/2witstudios/pagespace-cli.git
+cd pagespace-cli
+npm install
+npm link       # puts `pagespace` on your PATH
 pagespace
-
-# or without linking
-node bin/pagespace.mjs
 ```
 
 ### First run (Cursor-grade onboarding)
@@ -179,18 +177,15 @@ pi install -l .
 
 ## Install & distribution
 
-- Root package is `private: true` and not published.
-- Exposed CLI bin: `pagespace` → `bin/pagespace.mjs`.
-- Packaged files include `extensions`, `src`, `skills`, `prompts`, `bin`, `packages`, `README.md`.
-
-Local distribution options:
-
 ```bash
-npm link   # put pagespace on PATH locally
-npm pack   # create a tarball
+npm install -g pagespace-cli   # global install (recommended)
+npx pagespace-cli              # one-shot without global install
 ```
 
-There is currently no `peerDependencies` section in the root `package.json`; this repo vendors required pi packages via npm workspaces.
+- Exposed CLI bin: `pagespace` → `bin/pagespace.mjs`.
+- Packaged files: `extensions`, `src`, `skills`, `prompts`, `bin`, `packages`, `README.md`.
+- pi packages are vendored in `packages/` and built automatically via `postinstall`.
+- No global pi install required.
 
 ## Status & pointers
 
