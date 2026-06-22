@@ -67,6 +67,7 @@ export function parseEnvFile(body: string): Record<string, string> {
 export function applyEnv(parsed: Record<string, string>, env: NodeJS.ProcessEnv = process.env): string[] {
   const applied: string[] = [];
   for (const [k, v] of Object.entries(parsed)) {
+    if (SECRET_ENV_KEYS.includes(k as (typeof SECRET_ENV_KEYS)[number])) continue;
     if (env[k] === undefined || env[k] === "") {
       env[k] = v;
       applied.push(k);

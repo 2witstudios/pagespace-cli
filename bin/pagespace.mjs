@@ -322,9 +322,9 @@ async function loginCommand() {
   // pagespace login — interactive token capture → validate → persist to ~/.pagespace/credentials (0600).
   // The token never round-trips through .env or the shell env the agent sees (security ADR).
   process.stderr.write("pagespace · login\n");
-  process.stderr.write("Paste your PageSpace token (input is hidden): ");
-  // Read the token from stdin (tty off mode so it doesn't echo). Node has no built-in hidden prompt,
-  // so we read a line as-is — the token is written straight to the credential store, never to env.
+  process.stderr.write("Paste your PageSpace token: ");
+  // Read the token from stdin as a normal line; it is written straight to the credential store,
+  // never to .env and never to the spawned pi env.
   const readline = await import("node:readline/promises");
   const { stdin, stdout } = process;
   const rl = readline.createInterface({ input: stdin, output: stdout });
@@ -366,7 +366,7 @@ async function runOnboarding() {
 
   // STEP token: capture.
   process.stderr.write("pagespace · first run — let's get you set up.\n");
-  process.stderr.write("Paste your PageSpace token (input is hidden): ");
+  process.stderr.write("Paste your PageSpace token: ");
   const readline = await import("node:readline/promises");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   let token;
