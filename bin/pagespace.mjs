@@ -96,6 +96,10 @@ async function statusDoctor() {
     if (!set && required) missingRequired = true;
     console.log(`  ${set ? "✓" : required ? "✗" : "·"} ${key}${set ? "" : ` (unset — ${label})`}`);
   }
+  // Also surface the credential store state.
+  const credPath = path.join(os.homedir(), ".pagespace", "credentials");
+  const hasCreds = fs.existsSync(credPath);
+  console.log(`  ${hasCreds ? "✓" : "·"} credentials: ${hasCreds ? "present (~/.pagespace/credentials)" : "not set (run: pagespace login)"}`);
   if (missingRequired) {
     console.log("  → copy .mcp.json.example to .mcp.json and set your token, or export the env vars.");
     process.exit(1);
@@ -343,6 +347,13 @@ async function loginCommand() {
   process.stderr.write(`pagespace · token saved to ${credPath} (0600). Run: pagespace status\n`);
 }
 
+/** No token anywhere (env, .env, credential store) → run first-run onboarding instead of a hard exit. */
+function needsOnboarding() {
+  if (process.env.PAGESPACE_AUTH_TOKEN && process.env.PAGESPACE_AUTH_TOKEN.trim()) return false;
+  const credPath = path.join(os.homedir(), ".pagespace", "credentials");
+  return !fs.existsSync(credPath);
+}
+
 const sub = process.argv[2];
 if (sub === "status" || process.argv.includes("--check")) {
   statusDoctor();
@@ -352,6 +363,13 @@ if (sub === "status" || process.argv.includes("--check")) {
   resumeCommand(process.argv[3], process.argv.slice(4));
 } else if (sub === "login") {
   loginCommand();
+} else if (needsOnboarding()) {
+  // First run with no token: walk the user to a coding-ready state (Cursor-grade) instead of exiting.
+  process.stderr.write("pagespace · first run — let's get you set up.\n");
+  loginCommand();
+  // After login, the credential store is populated; relaunch so the provider picks up the token.
+  process.stderr.write("pagespace · launching…\n");
+  launchPi(process.argv.slice(2));
 } else {
   launchPi(process.argv.slice(2));
 }
